@@ -47,6 +47,9 @@ namespace AvatarSmartBackup
         // UI
         public bool showAdvanced = false;
         public bool zipSnapshots = true;            // crea ZIP se keepSnapshots > 1
+        // Scope impostazioni: per impostazione predefinita globali (LocalAppData).
+        // Abilita per forzare un file locale al progetto (override).
+        public bool useProjectSettings = false;
     }
 
     // ============= SESSION STATE (NON persiste al riavvio di Unity) =========
@@ -75,8 +78,8 @@ namespace AvatarSmartBackup
                 // Back-compat: could be ticks or ISO8601
                 if (long.TryParse(s, out var ticks) && ticks > 0)
                     return new DateTime(ticks, DateTimeKind.Utc);
-                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal, out var dt))
-                    return dt.ToUniversalTime();
+                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind, out var dt))
+                    return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
                 return null;
             }
             set
@@ -95,8 +98,8 @@ namespace AvatarSmartBackup
                 if (string.IsNullOrEmpty(s)) return null;
                 if (long.TryParse(s, out var ticks) && ticks > 0)
                     return new DateTime(ticks, DateTimeKind.Utc);
-                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal, out var dt))
-                    return dt.ToUniversalTime();
+                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind, out var dt))
+                    return dt.Kind == DateTimeKind.Utc ? dt : dt.ToUniversalTime();
                 return null;
             }
             set
@@ -374,25 +377,66 @@ namespace AvatarSmartBackup
             new DllCollector()
         };
 
-        const string SettingsPath = "ProjectSettings/AvatarBackupSettings.json";
+        // Persistenza impostazioni: globali (LocalAppData) o per-progetto
+        const string ProjectSettingsRel = "ProjectSettings/AvatarBackupSettings.json";
+        const string EditorPrefsKey_UseProject = "ASB/UseProjectSettings";
 
-        public static BackupSettings LoadSettings()
+        static string LocalAppDataDir
+        {
+            get
+            {
+                string root = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (string.IsNullOrEmpty(root))
+                    root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                return Path.Combine(root, "AvatarSmartBackup");
+            }
+        }
+
+        static string GlobalSettingsPath => Path.Combine(LocalAppDataDir, "GlobalSettings.json");
+        static string ProjectSettingsPath => Path.Combine(FileUtilEx.ProjectRoot, ProjectSettingsRel);
+
+        public static bool UseProjectSettings
+        {
+            get => EditorPrefs.GetBool(EditorPrefsKey_UseProject, false);
+            set => EditorPrefs.SetBool(EditorPrefsKey_UseProject, value);
+        }
+
+        static BackupSettings LoadFromPath(string path)
         {
             try
             {
-                string p = Path.Combine(FileUtilEx.ProjectRoot, SettingsPath);
-                if (File.Exists(p))
-                    return JsonUtility.FromJson<BackupSettings>(File.ReadAllText(p, Encoding.UTF8));
+                if (File.Exists(path))
+                {
+                    var s = JsonUtility.FromJson<BackupSettings>(File.ReadAllText(path, Encoding.UTF8));
+                    if (s != null) return s;
+                }
             }
             catch { }
             return new BackupSettings();
+        }
+
+        public static BackupSettings LoadSettings()
+        {
+            // Precedenza: scelta utente. Se globale mancante, fallback a progetto se presente.
+            bool useProj = UseProjectSettings;
+            BackupSettings s = useProj ? LoadFromPath(ProjectSettingsPath) : LoadFromPath(GlobalSettingsPath);
+
+            if (!useProj && !File.Exists(GlobalSettingsPath) && File.Exists(ProjectSettingsPath))
+            {
+                // Migrazione soft da vecchie versioni
+                s = LoadFromPath(ProjectSettingsPath);
+            }
+
+            s.useProjectSettings = useProj;
+            return s;
         }
 
         public static void SaveSettings(BackupSettings s)
         {
             try
             {
-                string p = Path.Combine(FileUtilEx.ProjectRoot, SettingsPath);
+                UseProjectSettings = s.useProjectSettings;
+                string p = s.useProjectSettings ? ProjectSettingsPath : GlobalSettingsPath;
                 Directory.CreateDirectory(Path.GetDirectoryName(p));
                 File.WriteAllText(p, JsonUtility.ToJson(s, true), Encoding.UTF8);
             }
@@ -748,9 +792,14 @@ namespace AvatarSmartBackup
         [MenuItem("Tools/Avatar Smart Backup")]
         public static void Open()
         {
-            var w = GetWindow<AvatarSmartBackupWindow>();
+            // Apri come utility (finestra flottante, stretta tipo tool)
+            var w = GetWindow<AvatarSmartBackupWindow>(true, "Avatar Smart Backup");
             w.titleContent = new GUIContent("Avatar Smart Backup");
-            w.minSize = new Vector2(420, 460);
+            w.minSize = new Vector2(300, 240);
+            // Dimensioni iniziali compatte
+            var p = w.position;
+            if (p.width < 320 || p.height < 260)
+                w.position = new Rect(p.x, p.y, 360, 280);
             w.Show();
         }
 
@@ -769,9 +818,114 @@ namespace AvatarSmartBackup
             if (_settings == null) _settings = BackupManager.LoadSettings();
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
+            // ===== Nuova UI semplificata (mostra solo On/Off e Delay) =====
             EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Backup VRChat/Avatar – Peace of Mind", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Backup incrementale, atomico e a prova di crash. Struttura cartelle identica al progetto. Manifest con GUID per gestire move/rename. ZIP opzionali con retention.", MessageType.Info);
+            EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Backup automatico, leggero e sicuro per progetti Avatar/VRChat. Scegli On/Off e il ritardo: il resto è opzionale.", MessageType.Info);
+
+            // Riga stato semplice
+            EditorGUILayout.BeginVertical("box");
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                bool running = Session.IsRunning;
+                string state = running ? "Attivo" : "Spento";
+                var prevColor = GUI.color;
+                GUI.color = running ? new Color(0.5f, 1f, 0.6f) : new Color(1f, 0.6f, 0.6f);
+                if (GUILayout.Button($"Backup automatici: {state}", GUILayout.Height(32)))
+                {
+                    if (running) TimerService.PauseTimer();
+                    else TimerService.StartTimerIfNeeded(_settings);
+                }
+                GUI.color = prevColor;
+
+                GUILayout.Space(8);
+                EditorGUILayout.LabelField("Ritardo (min)", GUILayout.Width(90));
+                _settings.intervalMinutes = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, 240);
+            }
+            EditorGUILayout.EndVertical();
+
+            var nextS = Session.NextRunUtc.HasValue ? Session.NextRunUtc.Value.ToLocalTime().ToString("HH:mm:ss") : "--";
+            var lastS = Session.LastBackupUtc.HasValue ? Session.LastBackupUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") : "mai";
+            EditorGUILayout.LabelField($"Prossimo: {nextS}    Ultimo: {lastS}    Runs: {Session.RunsCount}");
+
+            EditorGUILayout.Space(4);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("Backup adesso", GUILayout.Height(28)))
+                    BackupManager.RunBackupNow(_settings, showToast:true, reason:"manual");
+                if (GUILayout.Button("Apri cartella backup", GUILayout.Height(28)))
+                    EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
+            }
+
+            EditorGUILayout.Space(6);
+            _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, "Impostazioni avanzate");
+            if (_settings.showAdvanced)
+            {
+                EditorGUILayout.BeginVertical("box");
+                // Origine impostazioni
+                EditorGUILayout.LabelField("Origine delle impostazioni", EditorStyles.boldLabel);
+                bool newUseProj = EditorGUILayout.ToggleLeft("Usa impostazioni locali per questo progetto (override)", _settings.useProjectSettings);
+                if (newUseProj != _settings.useProjectSettings)
+                {
+                    _settings.useProjectSettings = newUseProj;
+                    BackupManager.SaveSettings(_settings);
+                    _settings = BackupManager.LoadSettings();
+                }
+                EditorGUILayout.Space(6);
+
+                // Comportamento
+                EditorGUILayout.LabelField("Comportamento", EditorStyles.boldLabel);
+                _settings.autoRunOnLoad = EditorGUILayout.ToggleLeft("Avvio automatico all'apertura del progetto", _settings.autoRunOnLoad);
+                _settings.backupOnPlayEnter = EditorGUILayout.ToggleLeft("Backup quando si entra in Play", _settings.backupOnPlayEnter);
+                _settings.keepSnapshots = Mathf.Clamp(EditorGUILayout.IntField("N° snapshot (ZIP) da mantenere", _settings.keepSnapshots), 1, 50);
+                _settings.zipSnapshots = EditorGUILayout.ToggleLeft("Crea snapshot ZIP oltre a Current/", _settings.zipSnapshots);
+
+                EditorGUILayout.Space(6);
+                EditorGUILayout.LabelField("Cosa includere", EditorStyles.boldLabel);
+                _settings.incVRCAssets = EditorGUILayout.ToggleLeft("VRC Expressions (.asset)", _settings.incVRCAssets);
+                _settings.incAnimControllers = EditorGUILayout.ToggleLeft("Animator Controller (.controller)", _settings.incAnimControllers);
+                _settings.incAnimationClips = EditorGUILayout.ToggleLeft("Animation Clips (.anim)", _settings.incAnimationClips);
+                _settings.incScenes = EditorGUILayout.ToggleLeft("Scene (.unity)", _settings.incScenes);
+                _settings.incMaterials = EditorGUILayout.ToggleLeft("Materiali (.mat) leggeri", _settings.incMaterials);
+                using (new EditorGUI.DisabledScope(!_settings.incMaterials))
+                    _settings.materialsMaxKB = (long)Mathf.Clamp(EditorGUILayout.LongField("Soglia materiali (KB)", _settings.materialsMaxKB), 10, 100*1024);
+                _settings.incDlls = EditorGUILayout.ToggleLeft("Plugin .dll in Assets (leggeri)", _settings.incDlls);
+                using (new EditorGUI.DisabledScope(!_settings.incDlls))
+                    _settings.dllsMaxKB = (long)Mathf.Clamp(EditorGUILayout.LongField("Soglia DLL (KB)", _settings.dllsMaxKB), 128, 1024*10);
+
+                EditorGUILayout.Space(6);
+                EditorGUILayout.LabelField("Cartelle", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField("Include (opzionale, prefissi tipo 'Assets/Avatars/'):");
+                DrawStringList(_settings.includeFolders, "Aggiungi cartella");
+                EditorGUILayout.LabelField("Escludi:");
+                DrawStringList(_settings.excludeFolders, "Aggiungi esclusione");
+
+                EditorGUILayout.EndVertical();
+            }
+
+            EditorGUILayout.Space(10);
+            EditorGUILayout.LabelField("Ripristino (semplice)", EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox("Un click per ripristinare l'ULTIMO backup completo (Current/). In alternativa apri la cartella e copia solo ciò che serve.", MessageType.None);
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Ripristina ultimo backup (OVERWRITE)", GUILayout.Height(26)))
+            {
+                if (EditorUtility.DisplayDialog("Ripristino", "Sovrascrivere i file del progetto con l'ultimo backup (Current/)? Consigliato chiudere Play e salvare tutto prima.", "Sì, ripristina", "Annulla"))
+                {
+                    RestoreLatest();
+                }
+            }
+            if (GUILayout.Button("Apri Current/ per restore manuale", GUILayout.Height(26)))
+            {
+                EditorUtility.RevealInFinder(Path.Combine(FileUtilEx.BackupRoot, "Current"));
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndScrollView();
+
+            if (GUI.changed) BackupManager.SaveSettings(_settings);
+            return; // evita di disegnare la vecchia UI sottostante
+
+            // (UI legacy rimossa)
 
             // Stato
             EditorGUILayout.LabelField("Project Root:", FileUtilEx.ProjectRoot);
