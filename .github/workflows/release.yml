@@ -3,10 +3,10 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - '*'         # parte quando pushi un tag (es. 1.0.0)
+      - '*'
 
 permissions:
-  contents: read    # questa repo (privata): basta read; scriviamo nella pubblica con il PAT
+  contents: read
 
 jobs:
   build:
@@ -19,14 +19,15 @@ jobs:
         shell: bash
         run: |
           ver=$(python3 - <<'PY'
-import json
-print(json.load(open('package.json'))['version'])
-PY
-)
+          import json
+          print(json.load(open('package.json'))['version'])
+          PY
+          )
           echo "version=$ver" >> $GITHUB_OUTPUT
 
       - name: Verifica che il tag combaci con la versione
         if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           VER="${{ steps.pkg.outputs.version }}"
@@ -36,11 +37,13 @@ PY
 
       - id: buildzip
         name: Crea ZIP VPM
+        shell: bash
         run: |
           NAME=$(python3 - <<'PY'
-import json; print(json.load(open('package.json'))['name'])
-PY
-)
+          import json
+          print(json.load(open('package.json'))['name'])
+          PY
+          )
           VER="${{ steps.pkg.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
           zip -r "$ZIP" package.json Editor
@@ -49,8 +52,8 @@ PY
       - name: Pubblica release nella repo PUBBLICA (flowye-backup-tool)
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.DIST_REPO_TOKEN }}                 # PAT con write sulla repo pubblica
-          repository: dummics/flowye-backup-tool               # destinazione
-          tag_name: ${{ steps.pkg.outputs.version }}           # crea/aggiorna release con stesso tag
+          token: ${{ secrets.DIST_REPO_TOKEN }}   # PAT con write sulla repo pubblica
+          repository: dummics/flowye-backup-tool # destinazione
+          tag_name: ${{ steps.pkg.outputs.version }}
           name: ${{ steps.pkg.outputs.version }}
           files: ${{ steps.buildzip.outputs.zip }}
