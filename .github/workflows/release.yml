@@ -1,7 +1,12 @@
-name: Build VPM Release
+name: build-release
 on:
+  workflow_dispatch:
   push:
-    tags: [ '*' ]   # ogni tag = nuova versione
+    tags:
+      - '*'         # parte quando pushi un tag (es. 1.0.0)
+
+permissions:
+  contents: read    # questa repo (privata): basta read; scriviamo nella pubblica con il PAT
 
 jobs:
   build:
@@ -10,23 +15,42 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: pkg
-        run: echo "ver=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
-
-      - name: Build VPM zip
+        name: Leggi versione da package.json
+        shell: bash
         run: |
-          NAME=$(jq -r .name package.json)
-          VER="${{ steps.pkg.outputs.ver }}"
+          ver=$(python3 - <<'PY'
+import json
+print(json.load(open('package.json'))['version'])
+PY
+)
+          echo "version=$ver" >> $GITHUB_OUTPUT
+
+      - name: Verifica che il tag combaci con la versione
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${{ steps.pkg.outputs.version }}"
+          if [ "$TAG" != "$VER" ]; then
+            echo "Tag ($TAG) != version ($VER) di package.json"; exit 1
+          fi
+
+      - id: buildzip
+        name: Crea ZIP VPM
+        run: |
+          NAME=$(python3 - <<'PY'
+import json; print(json.load(open('package.json'))['name'])
+PY
+)
+          VER="${{ steps.pkg.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
           zip -r "$ZIP" package.json Editor
-          echo "ZIP=$ZIP" >> $GITHUB_OUTPUT
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
 
-      # Crea/aggiorna la release nella REPO PUBBLICA (distribution)
-      - name: Create/Update release on public dist repo
+      - name: Pubblica release nella repo PUBBLICA (flowye-backup-tool)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.pkg.outputs.ver }}
-          name: ${{ steps.pkg.outputs.ver }}
-          repository: dummics/flowye-backup-tool   # <— repo PUBBLICA (dist/listing)
-          files: ${{ steps.build.outputs.ZIP }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}  # fine-grained token con repo:write su flowye-backup-tool
+          token: ${{ secrets.DIST_REPO_TOKEN }}                 # PAT con write sulla repo pubblica
+          repository: dummics/flowye-backup-tool               # destinazione
+          tag_name: ${{ steps.pkg.outputs.version }}           # crea/aggiorna release con stesso tag
+          name: ${{ steps.pkg.outputs.version }}
+          files: ${{ steps.buildzip.outputs.zip }}
