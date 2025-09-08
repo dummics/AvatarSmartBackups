@@ -1,0 +1,32 @@
+name: Build VPM Release
+on:
+  push:
+    tags: [ '*' ]   # ogni tag = nuova versione
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: pkg
+        run: echo "ver=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+
+      - name: Build VPM zip
+        run: |
+          NAME=$(jq -r .name package.json)
+          VER="${{ steps.pkg.outputs.ver }}"
+          ZIP="${NAME}-${VER}.zip"
+          zip -r "$ZIP" package.json Editor
+          echo "ZIP=$ZIP" >> $GITHUB_OUTPUT
+
+      # Crea/aggiorna la release nella REPO PUBBLICA (distribution)
+      - name: Create/Update release on public dist repo
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pkg.outputs.ver }}
+          name: ${{ steps.pkg.outputs.ver }}
+          repository: dummics/flowye-backup-tool   # <— repo PUBBLICA (dist/listing)
+          files: ${{ steps.build.outputs.ZIP }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}  # fine-grained token con repo:write su flowye-backup-tool
