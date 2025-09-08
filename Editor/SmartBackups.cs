@@ -1,6 +1,4 @@
-// Unity 2021.3+ / 2022.x – Editor only
-// Backup “peace of mind” per pipeline VRChat/Avatar – modulare + SessionState
-// Autore: Dominik + tuo copilot amichevole :)
+// / 2022.x – Editor only Backup Script for FLOWYE
 
 #if UNITY_EDITOR
 using System;
@@ -11,6 +9,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.IO.Compression;
 using System.Reflection;
+using System.Globalization;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -71,24 +70,41 @@ namespace AvatarSmartBackup
         {
             get
             {
-                long t = SessionState.GetInt(SessionKeys.NextRunUtcTicks, 0);
-                return t > 0 ? new DateTime(t, DateTimeKind.Utc) : (DateTime?)null;
+                var s = SessionState.GetString(SessionKeys.NextRunUtcTicks, "");
+                if (string.IsNullOrEmpty(s)) return null;
+                // Back-compat: could be ticks or ISO8601
+                if (long.TryParse(s, out var ticks) && ticks > 0)
+                    return new DateTime(ticks, DateTimeKind.Utc);
+                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal, out var dt))
+                    return dt.ToUniversalTime();
+                return null;
             }
             set
             {
-                SessionState.SetInt(SessionKeys.NextRunUtcTicks, value.HasValue ? (int)Math.Min(int.MaxValue, value.Value.Ticks) : 0);
+                if (value.HasValue)
+                    SessionState.SetString(SessionKeys.NextRunUtcTicks, value.Value.ToString("o"));
+                else
+                    SessionState.SetString(SessionKeys.NextRunUtcTicks, "");
             }
         }
         public static DateTime? LastBackupUtc
         {
             get
             {
-                long t = SessionState.GetInt(SessionKeys.LastBackupUtcTicks, 0);
-                return t > 0 ? new DateTime(t, DateTimeKind.Utc) : (DateTime?)null;
+                var s = SessionState.GetString(SessionKeys.LastBackupUtcTicks, "");
+                if (string.IsNullOrEmpty(s)) return null;
+                if (long.TryParse(s, out var ticks) && ticks > 0)
+                    return new DateTime(ticks, DateTimeKind.Utc);
+                if (DateTime.TryParse(s, null, DateTimeStyles.RoundtripKind | DateTimeStyles.AssumeUniversal, out var dt))
+                    return dt.ToUniversalTime();
+                return null;
             }
             set
             {
-                SessionState.SetInt(SessionKeys.LastBackupUtcTicks, value.HasValue ? (int)Math.Min(int.MaxValue, value.Value.Ticks) : 0);
+                if (value.HasValue)
+                    SessionState.SetString(SessionKeys.LastBackupUtcTicks, value.Value.ToString("o"));
+                else
+                    SessionState.SetString(SessionKeys.LastBackupUtcTicks, "");
             }
         }
         public static int RunsCount
@@ -547,11 +563,9 @@ namespace AvatarSmartBackup
                 // 3) prune di file rimossi
                 PruneRemoved(man);
 
-                // 4) scrivi manifest e flag ok
+                // 4) scrivi manifest e flag ok (atomico)
                 WriteManifest(man);
-                FileUtilEx.AtomicReplace(Path.Combine(CurrentDir, "backup.ok.tmp"),
-                                         Path.Combine(CurrentDir, "backup.ok")); // crea file vuoto con atomic-replace fallback
-                File.WriteAllText(Path.Combine(CurrentDir, "backup.ok"), DateTime.UtcNow.ToString("o"));
+                WriteOkFlag();
 
                 // 5) snapshot ZIP + retention
                 if (s.keepSnapshots > 1 && s.zipSnapshots)
