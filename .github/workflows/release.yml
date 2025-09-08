@@ -1,4 +1,5 @@
 name: build-release
+
 on:
   workflow_dispatch:
   push:
@@ -48,6 +49,7 @@ jobs:
           ZIP="${NAME}-${VER}.zip"
           zip -r "$ZIP" package.json Editor
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
 
       - name: Pubblica release nella repo PUBBLICA (flowye-backup-tool)
         uses: softprops/action-gh-release@v2
@@ -57,3 +59,23 @@ jobs:
           tag_name: ${{ steps.pkg.outputs.version }}
           name: ${{ steps.pkg.outputs.version }}
           files: ${{ steps.buildzip.outputs.zip }}
+
+      - name: Aggiorna index.json nella repo PUBBLICA
+        shell: bash
+        run: |
+          # Clona la repo pubblica
+          git clone https://github.com/dummics/flowye-backup-tool.git listing
+          cd listing
+
+          VER="${{ steps.pkg.outputs.version }}"
+          NAME="${{ steps.buildzip.outputs.name }}"
+          URL="https://github.com/dummics/flowye-backup-tool/releases/download/$VER/${NAME}-${VER}.zip"
+
+          # Aggiorna index.json con jq
+          jq ".versions[\"$VER\"] = {\"url\":\"$URL\"}" index.json > index.tmp && mv index.tmp index.json
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.json
+          git commit -m "Add version $VER to index.json"
+          git push https://x-access-token:${{ secrets.DIST_REPO_TOKEN }}@github.com/dummics/flowye-backup-tool.git main
