@@ -35,6 +35,12 @@ jobs:
           if [ "$TAG" != "$VER" ]; then
             echo "Tag ($TAG) != version ($VER) di package.json"; exit 1
           fi
+      - name: Valida JSON di source.json
+        shell: bash
+        run: |
+          git clone https://github.com/dummics/flowye-backup-tool.git listing
+          cd listing
+          jq '.' source.json > /dev/null
 
       - id: buildzip
         name: Crea ZIP VPM
