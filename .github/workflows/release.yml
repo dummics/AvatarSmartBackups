@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - '*'
+      - "*"
 
 permissions:
   contents: read
@@ -54,7 +54,7 @@ jobs:
       - name: Pubblica release nella repo PUBBLICA (flowye-backup-tool)
         uses: softprops/action-gh-release@v2
         with:
-          token: ${{ secrets.DIST_REPO_TOKEN }}   # PAT con write sulla repo pubblica
+          token: ${{ secrets.DIST_REPO_TOKEN }} # PAT con write sulla repo pubblica
           repository: dummics/flowye-backup-tool # destinazione
           tag_name: ${{ steps.pkg.outputs.version }}
           name: ${{ steps.pkg.outputs.version }}
@@ -63,19 +63,27 @@ jobs:
       - name: Aggiorna source.json nella repo PUBBLICA
         shell: bash
         run: |
-          # Clona la repo pubblica
           git clone https://github.com/dummics/flowye-backup-tool.git listing
           cd listing
 
           VER="${{ steps.pkg.outputs.version }}"
-          NAME="${{ steps.buildzip.outputs.name }}"
+          NAME="${{ steps.buildzip.outputs.name }}"   # es: dum.incb.system
           URL="https://github.com/dummics/flowye-backup-tool/releases/download/$VER/${NAME}-${VER}.zip"
 
-          # Aggiorna source.json con jq
-          jq ".versions[\"$VER\"] = {\"url\":\"$URL\"}" source.json > source.tmp && mv source.tmp source.json
+          # Aggiungi l'URL alla lista releases del pacchetto NAME (crea il pacchetto se manca)
+          jq --arg name "$NAME" --arg url "$URL" '
+            (.packages //= []) |
+            if (.packages | map(.name) | index($name)) != null then
+              (.packages |= map(if .name == $name
+                                then (.releases //= []) | .releases += [$url] | .releases |= unique
+                                else . end))
+            else
+              (.packages += [{name: $name, releases: [$url]}])
+            end
+          ' source.json > source.tmp && mv source.tmp source.json
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add source.json
-          git commit -m "Add version $VER to source.json"
+          git commit -m "Add $VER for $NAME to source.json"
           git push https://x-access-token:${{ secrets.DIST_REPO_TOKEN }}@github.com/dummics/flowye-backup-tool.git main
