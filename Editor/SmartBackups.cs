@@ -90,10 +90,11 @@ namespace AvatarSmartBackup
                             cancellable ? "Managed" : "None");
                         id = (int)_start.Invoke(null, new object[] { title, desc, opts });
                     }
-                    else
+                    else if (_start != null)
                     {
                         id = (int)_start.Invoke(null, new object[] { title, desc });
                     }
+                    else { return -1; }
                     if (onCancel != null && _registerCancel != null)
                     {
                         var pars = _registerCancel.GetParameters();
@@ -155,6 +156,11 @@ namespace AvatarSmartBackup
         public long materialsMaxKB = 1024;
         public bool incDlls = true;
         public long dllsMaxKB = 2048;
+
+        // UI presets for size limits (dropdown + custom)
+        // 0: 256 KB, 1: 512 KB, 2: 1024 KB, 3: 2048 KB, 4: 4096 KB, 5: Custom
+        public int materialsSizePresetIndex = 2;
+        public int dllSizePresetIndex = 3;
 
         // Folders
         public List<string> includeFolders = new List<string>() { "Assets/" };
@@ -282,15 +288,38 @@ namespace AvatarSmartBackup
 
     internal static class CollectHelpers
     {
+        static bool MatchesExt(string assetPath, string pat)
+        {
+            if (string.IsNullOrEmpty(pat)) return false;
+            pat = pat.Trim();
+            if (pat.StartsWith("*")) pat = pat.Substring(1);
+            if (!pat.StartsWith(".")) return false;
+            return assetPath.EndsWith(pat, StringComparison.OrdinalIgnoreCase);
+        }
         public static bool PassesFolderFilters(string assetPath, BackupSettings s)
         {
             if (!assetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) return false;
             if (s.includeFolders != null && s.includeFolders.Count > 0)
             {
-                bool any = s.includeFolders.Any(f => assetPath.StartsWith(f, StringComparison.OrdinalIgnoreCase));
+                bool any = s.includeFolders.Any(f =>
+                {
+                    var t = (f ?? string.Empty).Trim();
+                    if (string.IsNullOrEmpty(t)) return false;
+                    if (t.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                        return assetPath.StartsWith(t, StringComparison.OrdinalIgnoreCase);
+                    // Treat entries like ".anim" or "*.anim" as extension filters
+                    return MatchesExt(assetPath, t);
+                });
                 if (!any) return false;
             }
-            if (s.excludeFolders != null && s.excludeFolders.Any(f => assetPath.StartsWith(f, StringComparison.OrdinalIgnoreCase))) return false;
+            if (s.excludeFolders != null && s.excludeFolders.Any(f =>
+            {
+                var t = (f ?? string.Empty).Trim();
+                if (string.IsNullOrEmpty(t)) return false;
+                if (t.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                    return assetPath.StartsWith(t, StringComparison.OrdinalIgnoreCase);
+                return MatchesExt(assetPath, t);
+            })) return false;
             return true;
         }
     }
@@ -396,6 +425,40 @@ namespace AvatarSmartBackup
         }
     }
 
+    // Generic collector for additional extensions listed in include filters (e.g., ".prefab").
+    internal class AdditionalExtensionsCollector : IBackupCollector
+    {
+        static readonly string[] HeavySkip = new[] { ".fbx", ".obj", ".blend" };
+        public IEnumerable<string> CollectAbsolutePaths(BackupSettings s)
+        {
+            var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (s?.includeFolders != null)
+            {
+                foreach (var e in s.includeFolders)
+                {
+                    if (string.IsNullOrEmpty(e)) continue;
+                    string t = e.Trim();
+                    if (t.StartsWith("*")) t = t.Substring(1);
+                    if (!t.StartsWith(".")) continue;
+                    if (HeavySkip.Any(h => t.Equals(h, StringComparison.OrdinalIgnoreCase))) continue; // keep heavy types skipped
+                    exts.Add(t);
+                }
+            }
+            if (exts.Count == 0) yield break;
+            string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
+            foreach (var ext in exts)
+            {
+                string pattern = "*" + ext;
+                foreach (var abs in Directory.GetFiles(root, pattern, SearchOption.AllDirectories))
+                {
+                    string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                    if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;
+                    yield return abs;
+                }
+            }
+        }
+    }
+
     internal static class IOThrottle
     {
         // Copia stream -> stream con throttle (MB/s). 0 = illimitato.
@@ -436,7 +499,10 @@ namespace AvatarSmartBackup
     internal static class BackupManager
     {
         static readonly IBackupCollector[] Collectors = new IBackupCollector[]
-        { new VRCAssetsCollector(), new ControllersCollector(), new AnimClipsCollector(), new ScenesCollector(), new MaterialsCollector(), new DllCollector() };
+        {
+            new VRCAssetsCollector(), new ControllersCollector(), new AnimClipsCollector(), new ScenesCollector(),
+            new MaterialsCollector(), new DllCollector(), new AdditionalExtensionsCollector()
+        };
 
         const string ProjectSettingsRel = "ProjectSettings/AvatarBackupSettings.json";
         const string EditorPrefsKey_UseProject = "ASB/UseProjectSettings";
@@ -472,6 +538,14 @@ namespace AvatarSmartBackup
                 s = JsonUtility.FromJson<BackupSettings>(File.ReadAllText(GlobalSettingsPath, Encoding.UTF8));
             else s = new BackupSettings();
             s.useProjectSettings = UseProjectSettings;
+
+            // Sync dropdown presets with stored numeric limits (for backward compatibility)
+            long[] presetVals = new long[] { 256, 512, 1024, 2048, 4096 };
+            int CustomIdx = 5;
+            int idx = Array.IndexOf(presetVals, Math.Max(1, (int)s.materialsMaxKB));
+            s.materialsSizePresetIndex = idx >= 0 ? idx : CustomIdx;
+            idx = Array.IndexOf(presetVals, Math.Max(1, (int)s.dllsMaxKB));
+            s.dllSizePresetIndex = idx >= 0 ? idx : CustomIdx;
             return s;
         }
         public static void SaveSettings(BackupSettings s)
@@ -518,9 +592,10 @@ namespace AvatarSmartBackup
         static int _busy;
 
         // API pubblica
-        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null) => _ = RunBackupNowAsync(s, showToast, reason);
+        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null, bool showProgressUI = true)
+            => _ = RunBackupNowAsync(s, showToast, reason, showProgressUI);
 
-        public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason)
+        public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason, bool showProgressUI)
         {
             try
             {
@@ -569,14 +644,15 @@ namespace AvatarSmartBackup
 
                     bool needsCopy = true;
                     string md5 = null;
+                    ManifestEntry prevEntry = null;
                     if (prev != null)
                     {
-                        var prevEntry = (!string.IsNullOrEmpty(guid))
+                        prevEntry = (!string.IsNullOrEmpty(guid))
                             ? prev.entries.FirstOrDefault(x => x.guid == guid)
                             : prev.entries.FirstOrDefault(x => x.relPath == rel);
                         if (prevEntry != null && prevEntry.size == fi.Length && prevEntry.lastWriteUtcTicks == fi.LastWriteTimeUtc.Ticks)
                         {
-                            needsCopy = false;
+                            needsCopy = false; // unchanged content
                             md5 = prevEntry.md5;
                         }
                     }
@@ -592,7 +668,43 @@ namespace AvatarSmartBackup
                     });
 
                     string dst = Path.Combine(CurrentDir, rel);
-                    if (needsCopy) { copyJobs.Add((abs, dst)); copied++; } else skipped++;
+                    if (needsCopy)
+                    {
+                        copyJobs.Add((abs, dst));
+                        copied++;
+                    }
+                    else
+                    {
+                        // unchanged content; if path changed (rename/move), move existing cached copy
+                        if (prevEntry != null && !string.Equals(prevEntry.relPath, rel, StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                string oldAbs = Path.Combine(CurrentDir, prevEntry.relPath);
+                                if (File.Exists(oldAbs))
+                                {
+                                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                    if (File.Exists(dst)) File.Delete(dst);
+                                    File.Move(oldAbs, dst);
+                                }
+                                else
+                                {
+                                    // fallback: copy from project if cached file missing
+                                    copyJobs.Add((abs, dst));
+                                    copied++;
+                                    continue;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Warn($"Move-in-cache failed: {prevEntry.relPath} -> {rel} – {ex.Message}. Falling back to copy.");
+                                copyJobs.Add((abs, dst));
+                                copied++;
+                                continue;
+                            }
+                        }
+                        skipped++;
+                    }
 
                     // copia .meta sempre (leggero)
                     var meta = abs + ".meta";
@@ -603,7 +715,7 @@ namespace AvatarSmartBackup
                 if (copyJobs.Count > 0)
                 {
                     using var cts = new CancellationTokenSource();
-                    int progId = ProgressUX.Start("Avatar Smart Backup", "Copying files", cancellable: true, onCancel: () => { cts.Cancel(); return true; });
+                    int progId = showProgressUI ? ProgressUX.Start("Avatar Smart Backup", "Copying files", cancellable: true, onCancel: () => { cts.Cancel(); return true; }) : -1;
                     try
                     {
                         int done = 0, total = copyJobs.Count;
@@ -686,7 +798,7 @@ namespace AvatarSmartBackup
                 if (shouldZip)
                 {
                     var ctsZip = new CancellationTokenSource();
-                    try { await CreateZipAsync(s, ctsZip.Token, ctsZip); }
+                    try { await CreateZipAsync(s, ctsZip.Token, ctsZip, showProgressUI); }
                     catch (OperationCanceledException) { Log.Warn("ZIP canceled by user."); }
                 }
                 else
@@ -792,14 +904,14 @@ namespace AvatarSmartBackup
             return gb.ToString("0.00") + " GB";
         }
 
-        static Task CreateZipAsync(BackupSettings s, CancellationToken ct, CancellationTokenSource ctsForUi)
+        static Task CreateZipAsync(BackupSettings s, CancellationToken ct, CancellationTokenSource ctsForUi, bool showUI)
         {
             return Task.Run(() =>
             {
                 string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                 string zipPath = Path.Combine(ArchiveDir, $"{FileUtilEx.Sanitize(FileUtilEx.ProjectName)}_{stamp}.zip");
                 Directory.CreateDirectory(ArchiveDir);
-                int progId = ProgressUX.Start("Avatar Smart Backup", "Creating archive…", cancellable: true, onCancel: () => { ctsForUi.Cancel(); return true; });
+                int progId = showUI ? ProgressUX.Start("Avatar Smart Backup", "Creating archive…", cancellable: true, onCancel: () => { ctsForUi.Cancel(); return true; }) : -1;
                 try
                 {
                     // Zip manuale con progress + throttle, scrittura atomica
@@ -938,7 +1050,7 @@ namespace AvatarSmartBackup
                 var due = Session.NextRunUtc ?? now;
                 if (now >= due)
                 {
-                    BackupManager.RunBackupNow(s, showToast: true, reason: "timer");
+                    BackupManager.RunBackupNow(s, showToast: false, reason: "timer", showProgressUI: false);
                     ScheduleNext(now.AddMinutes(Math.Max(1, s.intervalMinutes)));
                 }
             }
@@ -950,7 +1062,7 @@ namespace AvatarSmartBackup
                 EditorApplication.playModeStateChanged += (state) =>
                 {
                     if (state == PlayModeStateChange.ExitingEditMode && s.backupOnPlayEnter)
-                        BackupManager.RunBackupNow(s, showToast: false, reason: "play-enter");
+                        BackupManager.RunBackupNow(s, showToast: false, reason: "play-enter", showProgressUI: false);
                 };
             }
 
@@ -990,15 +1102,17 @@ namespace AvatarSmartBackup
                 catch (Exception ex) { Log.Warn("VRChat hook failed (fallback to timer/Play). " + ex.Message); }
             }
 
-            static void OnVRC0() => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
-            static void OnVRC1(object _) => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
-            static void OnVRCPreprocessAvatar(object _a, object _b) => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
+            static void OnVRC0() => BackupManager.RunBackupNow(GetSettingsCached(), showToast: false, reason: "vrchat-preprocess", showProgressUI: false);
+            static void OnVRC1(object _) => BackupManager.RunBackupNow(GetSettingsCached(), showToast: false, reason: "vrchat-preprocess", showProgressUI: false);
+            static void OnVRCPreprocessAvatar(object _a, object _b) => BackupManager.RunBackupNow(GetSettingsCached(), showToast: false, reason: "vrchat-preprocess", showProgressUI: false);
         }
 
         public class AvatarSmartBackupWindow : EditorWindow
         {
             Vector2 _scroll;
             BackupSettings _settings;
+            string _newIncludePattern = "";
+            string _newExcludePattern = "";
 
             [MenuItem("Tools/Avatar Smart Backup")]
             public static void Open()
@@ -1017,7 +1131,7 @@ namespace AvatarSmartBackup
                 _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
                 EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
-                EditorGUILayout.HelpBox("Automatic background backups. Non-blocking progress. Zips only when needed.", MessageType.Info);
+                EditorGUILayout.HelpBox("Automatic safety copies in the background. Keeps Unity responsive. Creates compressed snapshots only when it’s helpful.", MessageType.Info);
 
                 EditorGUILayout.BeginVertical("box");
                 bool running = Session.IsRunning;
@@ -1034,19 +1148,28 @@ namespace AvatarSmartBackup
                 EditorGUILayout.LabelField($"Next: {Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--"}    Last: {Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "never"}");
 
                 // Pulsanti verticali
-                if (GUILayout.Button(new GUIContent("Backup Now", "Start a backup immediately (non-blocking)."))) BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual");
+                if (GUILayout.Button(new GUIContent("Backup Now", "Start a backup immediately (non-blocking)."))) BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
                 if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the folder where backups are stored."))) EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
 
                 _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, "Advanced Settings");
                 if (_settings.showAdvanced)
                 {
+                    // GENERAL
                     EditorGUILayout.BeginVertical("box");
-
+                    EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
                     _settings.useProjectSettings = EditorGUILayout.ToggleLeft(new GUIContent("Use project-local settings (override)", "Store settings in ProjectSettings so they travel with the project."), _settings.useProjectSettings);
                     BackupManager.SaveSettings(_settings); BackupManager.TimerService.InvalidateSettingsCache(); _settings = BackupManager.LoadSettings();
+                    EditorGUILayout.EndVertical();
 
-                    EditorGUILayout.Space(6);
+                    // ZIP POLICY
+                    EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.BeginHorizontal();
                     EditorGUILayout.LabelField("Zip Policy", EditorStyles.boldLabel);
+                    if (GUILayout.Button(new GUIContent("?", "What do these options mean?"), GUILayout.Width(22)))
+                    {
+                        EditorUtility.DisplayDialog("Zip Policy", "On Change: create a snapshot only when files changed.\nEvery N: after N backups with changes.\nDaily at HH:MM: one snapshot per day once the time is reached (after a change).\nOn Play: take a snapshot when entering Play Mode.\nManual: only when you press Backup Now.", "OK");
+                    }
+                    EditorGUILayout.EndHorizontal();
                     _settings.zipPolicy = (ZipPolicy)EditorGUILayout.EnumPopup(new GUIContent("Mode", "When to create zip snapshots."), _settings.zipPolicy);
                     if (_settings.zipPolicy == ZipPolicy.EveryN)
                         _settings.zipEveryN = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Every N backups", "Create a zip after this many backups with changes."), _settings.zipEveryN), 1, 50);
@@ -1055,15 +1178,19 @@ namespace AvatarSmartBackup
                         _settings.zipDailyHour = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Hour (0-23)", "Daily zip time (hour)."), _settings.zipDailyHour), 0, 23);
                         _settings.zipDailyMinute = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Minutes", "Daily zip time (minutes)."), _settings.zipDailyMinute), 0, 59);
                     }
-                    _settings.zipFastest = EditorGUILayout.ToggleLeft(new GUIContent("Compression level: Fastest (faster)", "Fastest is quicker but larger archives. Untick for Optimal (smaller, slower)."), _settings.zipFastest);
+                    _settings.zipFastest = EditorGUILayout.ToggleLeft(new GUIContent("Compression level: Fastest (quicker)", "Fastest is quicker but larger archives. Untick for Optimal (smaller, slower)."), _settings.zipFastest);
+                    EditorGUILayout.EndVertical();
 
-                    EditorGUILayout.Space(6);
+                    // PERFORMANCE
+                    EditorGUILayout.BeginVertical("box");
                     EditorGUILayout.LabelField("Performance", EditorStyles.boldLabel);
                     _settings.autoThrottle = EditorGUILayout.ToggleLeft(new GUIContent("Auto throttle (recommended)", "Automatically caps IO speed to keep the editor responsive."), _settings.autoThrottle);
                     _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Max parallel threads", "Number of concurrent copy/hash tasks."), _settings.maxParallelThreads), 1, Math.Max(1, System.Environment.ProcessorCount));
                     _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
+                    EditorGUILayout.EndVertical();
 
-                    EditorGUILayout.Space(6);
+                    // WHAT TO INCLUDE
+                    EditorGUILayout.BeginVertical("box");
                     EditorGUILayout.LabelField("What to include", EditorStyles.boldLabel);
                     _settings.incVRCAssets = EditorGUILayout.ToggleLeft(new GUIContent("VRC Expressions (.asset)", "Common VRC expression assets and similarly named .asset files."), _settings.incVRCAssets);
                     _settings.incAnimControllers = EditorGUILayout.ToggleLeft(new GUIContent("Animator Controllers (.controller)", "Animator controller assets."), _settings.incAnimControllers);
@@ -1072,31 +1199,107 @@ namespace AvatarSmartBackup
                     _settings.incMaterials = EditorGUILayout.ToggleLeft(new GUIContent("Materials (.mat) under size limit", "Small material files. Larger ones are skipped by threshold."), _settings.incMaterials);
                     using (new EditorGUI.DisabledScope(!_settings.incMaterials))
                     {
-                        long v = EditorGUILayout.LongField(new GUIContent("Material size limit (KB)", "Skip materials larger than this size."), _settings.materialsMaxKB);
-                        v = Math.Max(10L, Math.Min(v, 100L * 1024L));
-                        _settings.materialsMaxKB = v;
+                        // Presets for materials
+                        string[] names = new[] { "256 KB", "512 KB", "1 MB", "2 MB", "4 MB", "Custom" };
+                        long[] values = new long[] { 256, 512, 1024, 2048, 4096, -1 };
+                        _settings.materialsSizePresetIndex = EditorGUILayout.Popup(new GUIContent("Material size limit", "Skip materials larger than this size."), _settings.materialsSizePresetIndex, names);
+                        int mi = Mathf.Clamp(_settings.materialsSizePresetIndex, 0, names.Length - 1);
+                        if (mi < names.Length - 1)
+                        {
+                            _settings.materialsMaxKB = values[mi];
+                            EditorGUILayout.LabelField($"= {_settings.materialsMaxKB} KB");
+                        }
+                        else
+                        {
+                            long v = EditorGUILayout.LongField(new GUIContent("Custom (KB)", "Custom max size in KB."), _settings.materialsMaxKB);
+                            v = Math.Max(10L, Math.Min(v, 100L * 1024L));
+                            _settings.materialsMaxKB = v;
+                        }
                     }
                     _settings.incDlls = EditorGUILayout.ToggleLeft(new GUIContent("Plugin .dll in Assets (under size limit)", "Small .dll files under Assets/ (useful for simple plugins)."), _settings.incDlls);
                     using (new EditorGUI.DisabledScope(!_settings.incDlls))
                     {
-                        long v = EditorGUILayout.LongField(new GUIContent("DLL size limit (KB)", "Skip DLLs larger than this size."), _settings.dllsMaxKB);
-                        v = Math.Max(128L, Math.Min(v, 1024L * 10L));
-                        _settings.dllsMaxKB = v;
+                        string[] names = new[] { "512 KB", "1 MB", "2 MB", "4 MB", "Custom" };
+                        long[] values = new long[] { 512, 1024, 2048, 4096, -1 };
+                        _settings.dllSizePresetIndex = EditorGUILayout.Popup(new GUIContent("DLL size limit", "Skip DLLs larger than this size."), _settings.dllSizePresetIndex, names);
+                        int di = Mathf.Clamp(_settings.dllSizePresetIndex, 0, names.Length - 1);
+                        if (di < names.Length - 1)
+                        {
+                            _settings.dllsMaxKB = values[di];
+                            EditorGUILayout.LabelField($"= {_settings.dllsMaxKB} KB");
+                        }
+                        else
+                        {
+                            long v = EditorGUILayout.LongField(new GUIContent("Custom (KB)", "Custom max size in KB."), _settings.dllsMaxKB);
+                            v = Math.Max(128L, Math.Min(v, 1024L * 10L));
+                            _settings.dllsMaxKB = v;
+                        }
                     }
+                    EditorGUILayout.EndVertical();
 
-                    EditorGUILayout.Space(6);
-                    EditorGUILayout.LabelField("Folders", EditorStyles.boldLabel);
-                    EditorGUILayout.LabelField("Include (prefixes, e.g., 'Assets/Avatars/'):");
-                    DrawStringListVertical(_settings.includeFolders, "Add folder");
+                    // FOLDERS & EXTENSIONS
+                    EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.LabelField("Folders & Extensions", EditorStyles.boldLabel);
+                    EditorGUILayout.LabelField("Include entries can be folder prefixes (e.g., Assets/Avatars/) or extensions (e.g., .prefab).", EditorStyles.miniLabel);
+
+                    EditorGUILayout.LabelField("Include:");
+                    DrawStringListVertical(_settings.includeFolders, "Add");
+                    EditorGUILayout.BeginHorizontal();
+                    _newIncludePattern = EditorGUILayout.TextField(new GUIContent("Add extension or prefix", "Enter .ext or Assets/..."), _newIncludePattern);
+                    if (GUILayout.Button(new GUIContent("Add", "Add this entry"), GUILayout.Width(60)))
+                    {
+                        var t = (_newIncludePattern ?? string.Empty).Trim();
+                        if (!string.IsNullOrEmpty(t)) { _settings.includeFolders.Add(t); _newIncludePattern = string.Empty; }
+                    }
+                    if (GUILayout.Button(new GUIContent("Add folder…", "Pick a project folder to include"), GUILayout.Width(100)))
+                    {
+                        var abs = EditorUtility.OpenFolderPanel("Select folder to include", FileUtilEx.ProjectRoot, "");
+                        if (!string.IsNullOrEmpty(abs))
+                        {
+                            if (!abs.Replace('\\','/').StartsWith(FileUtilEx.ProjectRoot.Replace('\\','/') + "/", StringComparison.OrdinalIgnoreCase))
+                                EditorUtility.DisplayDialog("Outside project", "Please select a folder inside this Unity project.", "OK");
+                            else
+                            {
+                                string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                                if (!rel.EndsWith("/")) rel += "/";
+                                if (!_settings.includeFolders.Contains(rel)) _settings.includeFolders.Add(rel);
+                            }
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+
+                    EditorGUILayout.Space(4);
                     EditorGUILayout.LabelField("Exclude:");
-                    DrawStringListVertical(_settings.excludeFolders, "Add exclusion");
-
+                    DrawStringListVertical(_settings.excludeFolders, "Add");
+                    EditorGUILayout.BeginHorizontal();
+                    _newExcludePattern = EditorGUILayout.TextField(new GUIContent("Add extension or prefix", "Enter .ext or Assets/..."), _newExcludePattern);
+                    if (GUILayout.Button(new GUIContent("Add", "Add this entry"), GUILayout.Width(60)))
+                    {
+                        var t = (_newExcludePattern ?? string.Empty).Trim();
+                        if (!string.IsNullOrEmpty(t)) { _settings.excludeFolders.Add(t); _newExcludePattern = string.Empty; }
+                    }
+                    if (GUILayout.Button(new GUIContent("Add folder…", "Pick a project folder to exclude"), GUILayout.Width(100)))
+                    {
+                        var abs = EditorUtility.OpenFolderPanel("Select folder to exclude", FileUtilEx.ProjectRoot, "");
+                        if (!string.IsNullOrEmpty(abs))
+                        {
+                            if (!abs.Replace('\\','/').StartsWith(FileUtilEx.ProjectRoot.Replace('\\','/') + "/", StringComparison.OrdinalIgnoreCase))
+                                EditorUtility.DisplayDialog("Outside project", "Please select a folder inside this Unity project.", "OK");
+                            else
+                            {
+                                string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                                if (!rel.EndsWith("/")) rel += "/";
+                                if (!_settings.excludeFolders.Contains(rel)) _settings.excludeFolders.Add(rel);
+                            }
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
                     EditorGUILayout.EndVertical();
                 }
 
                 EditorGUILayout.Space(10);
                 EditorGUILayout.LabelField("Restore (safe)", EditorStyles.boldLabel);
-                if (GUILayout.Button("Preview & Restore latest backup", GUILayout.Height(22)))
+                if (GUILayout.Button(new GUIContent("Preview & Restore latest backup", "Preview files and choose what to restore. A pre-restore backup of current Assets can be created."), GUILayout.Height(22)))
                 {
                     RestorePreviewWindow.Open();
                 }
