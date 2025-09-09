@@ -20,6 +20,30 @@ using UnityEngine;
 
 namespace AvatarSmartBackup
 {
+    [InitializeOnLoad]
+    internal static class MainThread
+    {
+        static readonly int MainId;
+        static MainThread()
+        {
+            MainId = Thread.CurrentThread.ManagedThreadId;
+        }
+        public static void Invoke(Action a)
+        {
+            if (Thread.CurrentThread.ManagedThreadId == MainId) a();
+            else EditorApplication.delayCall += () => a();
+        }
+        public static T InvokeBlocking<T>(Func<T> f)
+        {
+            if (Thread.CurrentThread.ManagedThreadId == MainId) return f();
+            T result = default;
+            var ev = new ManualResetEventSlim();
+            EditorApplication.delayCall += () => { result = f(); ev.Set(); };
+            ev.Wait();
+            return result;
+        }
+    }
+
     internal static class Log
     {
         const string Tag = "[ Avatar Backup System ] ";
@@ -55,33 +79,36 @@ namespace AvatarSmartBackup
         {
             Ensure();
             if (_progressType == null) return -1;
-            int id;
             try
             {
-                if (_start != null && _start.GetParameters().Length == 3)
+                return MainThread.InvokeBlocking(() =>
                 {
-                    var opts = (UnityEditor.Progress.Options)Enum.Parse(typeof(UnityEditor.Progress.Options),
-                        cancellable ? "Managed" : "None");
-                    id = (int)_start.Invoke(null, new object[] { title, desc, opts });
-                }
-                else
-                {
-                    id = (int)_start.Invoke(null, new object[] { title, desc });
-                }
-                if (onCancel != null && _registerCancel != null)
-                {
-                    var pars = _registerCancel.GetParameters();
-                    if (pars.Length == 2 && pars[1].ParameterType == typeof(Action))
+                    int id;
+                    if (_start != null && _start.GetParameters().Length == 3)
                     {
-                        Action act = () => onCancel();
-                        _registerCancel.Invoke(null, new object[] { id, act });
+                        var opts = (UnityEditor.Progress.Options)Enum.Parse(typeof(UnityEditor.Progress.Options),
+                            cancellable ? "Managed" : "None");
+                        id = (int)_start.Invoke(null, new object[] { title, desc, opts });
                     }
                     else
                     {
-                        _registerCancel.Invoke(null, new object[] { id, onCancel });
+                        id = (int)_start.Invoke(null, new object[] { title, desc });
                     }
-                }
-                return id;
+                    if (onCancel != null && _registerCancel != null)
+                    {
+                        var pars = _registerCancel.GetParameters();
+                        if (pars.Length == 2 && pars[1].ParameterType == typeof(Action))
+                        {
+                            Action act = () => onCancel();
+                            _registerCancel.Invoke(null, new object[] { id, act });
+                        }
+                        else
+                        {
+                            _registerCancel.Invoke(null, new object[] { id, onCancel });
+                        }
+                    }
+                    return id;
+                });
             }
             catch { return -1; }
         }
@@ -90,7 +117,7 @@ namespace AvatarSmartBackup
         {
             if (id < 0) return;
             Ensure();
-            try { _report?.Invoke(null, new object[] { id, Mathf.Clamp01(p), desc }); }
+            try { MainThread.Invoke(() => _report?.Invoke(null, new object[] { id, Mathf.Clamp01(p), desc })); }
             catch { /* ignore */ }
         }
 
@@ -98,14 +125,14 @@ namespace AvatarSmartBackup
         {
             if (id < 0) return;
             Ensure();
-            try { _finish?.Invoke(null, new object[] { id }); }
+            try { MainThread.Invoke(() => _finish?.Invoke(null, new object[] { id })); }
             catch { /* ignore */ }
         }
         public static void Remove(int id)
         {
             if (id < 0) return;
             Ensure();
-            try { _remove?.Invoke(null, new object[] { id }); }
+            try { MainThread.Invoke(() => _remove?.Invoke(null, new object[] { id })); }
             catch { /* ignore */ }
         }
     }
@@ -486,13 +513,24 @@ namespace AvatarSmartBackup
             if (anyDirty) EditorSceneManager.SaveOpenScenes();
         }
 
-        // API pubblica
-        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null) => RunBackupNowAsync(s, showToast, reason);
+        // Anti re-entrancy guards
+        static readonly SemaphoreSlim _one = new SemaphoreSlim(1, 1);
+        static int _busy;
 
-        public static async void RunBackupNowAsync(BackupSettings s, bool showToast, string reason)
+        // API pubblica
+        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null) => _ = RunBackupNowAsync(s, showToast, reason);
+
+        public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason)
         {
             try
             {
+                if (Interlocked.Exchange(ref _busy, 1) == 1)
+                {
+                    Log.Warn("Backup already running – skipped.");
+                    return;
+                }
+                await _one.WaitAsync();
+
                 if (s.saveScenesBeforeBackup) SaveOpenScenesIfDirty();
 
                 // 1) Scan e decisione (no UI)
@@ -582,11 +620,15 @@ namespace AvatarSmartBackup
                                 {
                                     Directory.CreateDirectory(Path.GetDirectoryName(job.dst));
                                     // Throttled copy
-                                    using var src = new FileStream(job.src, FileMode.Open, FileAccess.Read, FileShare.Read);
+                                    using var src = new FileStream(job.src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                                     string tmp = job.dst + ".tmp";
                                     using (var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
                                         IOThrottle.CopyStreamThrottled(src, dst, bufferBytes: 2 * 1024 * 1024, maxMBps: EffectiveCopyMBps(s), ct: cts.Token);
                                     FileUtilEx.AtomicReplace(tmp, job.dst);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Warn($"Copy failed: {job.src} – {ex.Message}");
                                 }
                                 finally
                                 {
@@ -633,14 +675,19 @@ namespace AvatarSmartBackup
                 WriteManifest(man);
                 File.WriteAllText(Path.Combine(CurrentDir, "backup.ok"), DateTime.UtcNow.ToString("o"));
 
-                Session.LastBackupUtc = DateTime.UtcNow;
-                Session.RunsCount = Session.RunsCount + 1;
+                MainThread.Invoke(() =>
+                {
+                    Session.LastBackupUtc = DateTime.UtcNow;
+                    Session.RunsCount = Session.RunsCount + 1;
+                });
 
                 // 4) Zip Policy
                 bool shouldZip = ShouldCreateZip(s, hadChanges: copied > 0);
                 if (shouldZip)
                 {
-                    await CreateZipAsync(s, CancellationToken.None);
+                    var ctsZip = new CancellationTokenSource();
+                    try { await CreateZipAsync(s, ctsZip.Token, ctsZip); }
+                    catch (OperationCanceledException) { Log.Warn("ZIP canceled by user."); }
                 }
                 else
                 {
@@ -652,7 +699,7 @@ namespace AvatarSmartBackup
                     string msg = (copied > 0)
                         ? $"Backup OK ({reason ?? "timer"})  • copied {copied}, skippati {skipped}"
                         : $"No changes ({reason ?? "timer"})  • 0 files copied";
-                    EditorWindow.focusedWindow?.ShowNotification(new GUIContent(msg));
+                    MainThread.Invoke(() => { EditorWindow.focusedWindow?.ShowNotification(new GUIContent(msg)); });
                 }
                 Log.Info($"Backup completed. Copied {copied}, Skipped {skipped}, Total {man.entries.Count}.");
             }
@@ -664,6 +711,11 @@ namespace AvatarSmartBackup
             {
                 Log.Err("Backup error: " + ex);
             }
+            finally
+            {
+                Interlocked.Exchange(ref _busy, 0);
+                try { _one.Release(); } catch { }
+            }
         }
 
         static void PruneRemoved(BackupManifest newMan)
@@ -674,7 +726,15 @@ namespace AvatarSmartBackup
             foreach (var abs in all)
             {
                 string rel = MakeRelTo(abs, CurrentDir).Replace("\\", "/");
-                if (!keep.Contains(rel)) { try { File.Delete(abs); } catch { } }
+                if (!keep.Contains(rel))
+                {
+                    try
+                    {
+                        System.Diagnostics.Debug.Assert(abs.StartsWith(CurrentDir, StringComparison.OrdinalIgnoreCase));
+                        File.Delete(abs);
+                    }
+                    catch { }
+                }
             }
             foreach (var d in Directory.GetDirectories(CurrentDir, "*", SearchOption.AllDirectories))
                 if (!Directory.EnumerateFileSystemEntries(d).Any())
@@ -732,15 +792,14 @@ namespace AvatarSmartBackup
             return gb.ToString("0.00") + " GB";
         }
 
-        static Task CreateZipAsync(BackupSettings s, CancellationToken ct)
+        static Task CreateZipAsync(BackupSettings s, CancellationToken ct, CancellationTokenSource ctsForUi)
         {
             return Task.Run(() =>
             {
                 string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                 string zipPath = Path.Combine(ArchiveDir, $"{FileUtilEx.Sanitize(FileUtilEx.ProjectName)}_{stamp}.zip");
                 Directory.CreateDirectory(ArchiveDir);
-
-                int progId = ProgressUX.Start("Avatar Smart Backup", "Creating archive…", cancellable: true, onCancel: () => { /* non interrompiamo metà zip atomicamente */ return false; });
+                int progId = ProgressUX.Start("Avatar Smart Backup", "Creating archive…", cancellable: true, onCancel: () => { ctsForUi.Cancel(); return true; });
                 try
                 {
                     // Zip manuale con progress + throttle, scrittura atomica
@@ -763,7 +822,7 @@ namespace AvatarSmartBackup
                             string rel = MakeRelTo(abs, CurrentDir).Replace("\\", "/");
                             var entry = zip.CreateEntry(rel, s.zipFastest ? System.IO.Compression.CompressionLevel.Fastest : System.IO.Compression.CompressionLevel.Optimal);
                             using var entryStream = entry.Open();
-                            using var src = new FileStream(abs, FileMode.Open, FileAccess.Read, FileShare.Read);
+                            using var src = new FileStream(abs, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                             IOThrottle.CopyStreamThrottled(src, entryStream, bufferBytes: 2 * 1024 * 1024, maxMBps: EffectiveZipMBps(s), ct: ct);
                             written += src.Length;
                             float p = totalBytes > 0 ? (float)written / totalBytes : 1f;
@@ -776,8 +835,26 @@ namespace AvatarSmartBackup
                     // retention
                     if (s.keepSnapshots > 1)
                     {
+                        DateTime ParseZipStamp(string path)
+                        {
+                            try
+                            {
+                                string name = Path.GetFileNameWithoutExtension(path);
+                                string prefix = FileUtilEx.Sanitize(FileUtilEx.ProjectName) + "_";
+                                int idx = name.LastIndexOf('_');
+                                if (idx >= 0 && name.StartsWith(prefix, StringComparison.Ordinal))
+                                {
+                                    string ts = name.Substring(prefix.Length);
+                                    if (DateTime.TryParseExact(ts, "yyyy-MM-dd_HH-mm-ss", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeLocal, out var dt))
+                                        return dt.ToUniversalTime();
+                                }
+                            }
+                            catch { }
+                            return new FileInfo(path).LastWriteTimeUtc;
+                        }
+
                         var zips = Directory.GetFiles(ArchiveDir, "*.zip", SearchOption.TopDirectoryOnly)
-                                            .OrderByDescending(f => new FileInfo(f).CreationTimeUtc)
+                                            .OrderByDescending(f => ParseZipStamp(f))
                                             .ToList();
                         for (int i = s.keepSnapshots; i < zips.Count; i++)
                             try { File.Delete(zips[i]); } catch { }
@@ -792,6 +869,12 @@ namespace AvatarSmartBackup
                 finally
                 {
                     ProgressUX.Finish(progId);
+                    try
+                    {
+                        string tmp = zipPath + ".tmp";
+                        if (File.Exists(tmp)) File.Delete(tmp);
+                    }
+                    catch { }
                 }
             }, ct);
         }
@@ -803,6 +886,8 @@ namespace AvatarSmartBackup
         {
             static readonly double UpdateEverySec = 0.5;
             static double _nextTick;
+            static BackupSettings _cached;
+            static double _nextReload;
 
             static TimerService()
             {
@@ -811,6 +896,17 @@ namespace AvatarSmartBackup
                 if (settings.autoRunOnLoad) StartTimerIfNeeded(settings);
                 TryHookVRChat();
             }
+
+            static BackupSettings GetSettingsCached()
+            {
+                if (_cached == null || EditorApplication.timeSinceStartup >= _nextReload)
+                {
+                    _cached = BackupManager.LoadSettings();
+                    _nextReload = EditorApplication.timeSinceStartup + 10.0; // reload every 10s
+                }
+                return _cached;
+            }
+            public static void InvalidateSettingsCache() { _cached = null; _nextReload = 0; }
 
             public static void StartTimerIfNeeded(BackupSettings s)
             {
@@ -833,7 +929,7 @@ namespace AvatarSmartBackup
                 if (EditorApplication.timeSinceStartup < _nextTick) return;
                 _nextTick = EditorApplication.timeSinceStartup + UpdateEverySec;
 
-                var s = BackupManager.LoadSettings();
+                var s = GetSettingsCached();
                 if (!Session.IsRunning) return;
                 if (EditorApplication.isCompiling || EditorApplication.isUpdating) return;
                 if (EditorApplication.isPlayingOrWillChangePlaymode) return;
@@ -894,9 +990,9 @@ namespace AvatarSmartBackup
                 catch (Exception ex) { Log.Warn("VRChat hook failed (fallback to timer/Play). " + ex.Message); }
             }
 
-            static void OnVRC0() => BackupManager.RunBackupNow(BackupManager.LoadSettings(), reason: "vrchat-preprocess");
-            static void OnVRC1(object _) => BackupManager.RunBackupNow(BackupManager.LoadSettings(), reason: "vrchat-preprocess");
-            static void OnVRCPreprocessAvatar(object _a, object _b) => BackupManager.RunBackupNow(BackupManager.LoadSettings(), reason: "vrchat-preprocess");
+            static void OnVRC0() => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
+            static void OnVRC1(object _) => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
+            static void OnVRCPreprocessAvatar(object _a, object _b) => BackupManager.RunBackupNow(GetSettingsCached(), reason: "vrchat-preprocess");
         }
 
         public class AvatarSmartBackupWindow : EditorWindow
@@ -913,7 +1009,7 @@ namespace AvatarSmartBackup
             }
 
             void OnEnable() => _settings = BackupManager.LoadSettings();
-            void OnDisable() => BackupManager.SaveSettings(_settings);
+            void OnDisable() { BackupManager.SaveSettings(_settings); BackupManager.TimerService.InvalidateSettingsCache(); }
 
             void OnGUI()
             {
@@ -947,7 +1043,7 @@ namespace AvatarSmartBackup
                     EditorGUILayout.BeginVertical("box");
 
                     _settings.useProjectSettings = EditorGUILayout.ToggleLeft(new GUIContent("Use project-local settings (override)", "Store settings in ProjectSettings so they travel with the project."), _settings.useProjectSettings);
-                    BackupManager.SaveSettings(_settings); _settings = BackupManager.LoadSettings();
+                    BackupManager.SaveSettings(_settings); BackupManager.TimerService.InvalidateSettingsCache(); _settings = BackupManager.LoadSettings();
 
                     EditorGUILayout.Space(6);
                     EditorGUILayout.LabelField("Zip Policy", EditorStyles.boldLabel);
@@ -1009,7 +1105,7 @@ namespace AvatarSmartBackup
 
                 EditorGUILayout.EndScrollView();
 
-                if (GUI.changed) BackupManager.SaveSettings(_settings);
+                if (GUI.changed) { BackupManager.SaveSettings(_settings); BackupManager.TimerService.InvalidateSettingsCache(); }
             }
 
 
@@ -1032,6 +1128,8 @@ namespace AvatarSmartBackup
             {
                 string srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
                 if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "No Current/ backup found.", "OK"); return; }
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
                 foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
                 {
                     string rel = MakeRelTo(src, srcRoot).Replace("\\", "/");
@@ -1041,7 +1139,7 @@ namespace AvatarSmartBackup
                     try { Directory.CreateDirectory(Path.GetDirectoryName(dst)); File.Copy(src, dst, true); }
                     catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " – " + ex.Message); }
                 }
-                AssetDatabase.Refresh();
+                MainThread.Invoke(() => AssetDatabase.Refresh());
                 EditorUtility.DisplayDialog("Restore", "Restore completato.", "OK");
             }
 
@@ -1078,6 +1176,8 @@ namespace AvatarSmartBackup
                 _extCounts.Clear(); _assetTypeCounts.Clear();
                 string srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
                 if (!Directory.Exists(srcRoot)) return;
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
                 foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
                 {
                     string rel = MakeRelTo(src, srcRoot).Replace("\\", "/");
@@ -1148,7 +1248,12 @@ namespace AvatarSmartBackup
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.BeginHorizontal();
-                _selectAll = EditorGUILayout.ToggleLeft("Select All", _selectAll, GUILayout.Width(100));
+                bool newSelectAll = EditorGUILayout.ToggleLeft("Select All", _selectAll, GUILayout.Width(100));
+                if (newSelectAll != _selectAll)
+                {
+                    _selectAll = newSelectAll;
+                    for (int i = 0; i < _selected.Count; i++) _selected[i] = _selectAll;
+                }
                 if (GUILayout.Button("Refresh", GUILayout.Width(80))) LoadFiles();
                 GUILayout.FlexibleSpace();
                 _backupBefore = EditorGUILayout.ToggleLeft("Backup current Assets before restore", _backupBefore, GUILayout.Width(240));
@@ -1160,7 +1265,7 @@ namespace AvatarSmartBackup
                 if (_files.Count == 0) EditorGUILayout.LabelField("No files found in Current/ to restore.");
                 for (int i = 0; i < _files.Count; i++)
                 {
-                    if (_selectAll) _selected[i] = true;
+                    // Honor select-all only when toggled above (no per-frame forcing)
                     EditorGUILayout.BeginHorizontal();
                     _selected[i] = EditorGUILayout.Toggle(_selected[i], GUILayout.Width(18));
                     EditorGUILayout.LabelField(_files[i], GUILayout.ExpandWidth(true));
