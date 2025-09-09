@@ -176,7 +176,7 @@ namespace AvatarSmartBackup
         public int zipMaxMBps = 150;                   // Manual cap (MB/s). 0 = unlimited
         public int maxParallelThreads = Math.Max(1, Environment.ProcessorCount);
 
-        public bool saveScenesBeforeBackup = false;    // Avoid blocking by default
+        public bool saveScenesBeforeBackup = true;    // Avoid blocking by default
 
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
@@ -833,6 +833,12 @@ namespace AvatarSmartBackup
         static void PruneRemoved(BackupManifest newMan)
         {
             var keep = new HashSet<string>(newMan.entries.Select(e => e.relPath), StringComparer.OrdinalIgnoreCase);
+            // Keep associated .meta files too
+            foreach (var e in newMan.entries)
+            {
+                string meta = e.relPath + ".meta";
+                if (!keep.Contains(meta)) keep.Add(meta);
+            }
             keep.Add("manifest.json"); keep.Add("backup.ok");
             var all = Directory.Exists(CurrentDir) ? Directory.GetFiles(CurrentDir, "*", SearchOption.AllDirectories) : Array.Empty<string>();
             foreach (var abs in all)
@@ -1058,11 +1064,11 @@ namespace AvatarSmartBackup
             [InitializeOnLoadMethod]
             static void HookPlaymodeShot()
             {
-                var s = BackupManager.LoadSettings();
                 EditorApplication.playModeStateChanged += (state) =>
                 {
-                    if (state == PlayModeStateChange.ExitingEditMode && s.backupOnPlayEnter)
-                        BackupManager.RunBackupNow(s, showToast: false, reason: "play-enter", showProgressUI: false);
+                    var sNow = GetSettingsCached();
+                    if (state == PlayModeStateChange.ExitingEditMode && sNow.backupOnPlayEnter)
+                        BackupManager.RunBackupNow(sNow, showToast: false, reason: "play-enter", showProgressUI: false);
                 };
             }
 
@@ -1113,6 +1119,10 @@ namespace AvatarSmartBackup
             BackupSettings _settings;
             string _newIncludePattern = "";
             string _newExcludePattern = "";
+            string _includePrefix = "";
+            string _excludePrefix = "";
+            UnityEngine.Object _includeFolderObj;
+            UnityEngine.Object _excludeFolderObj;
 
             [MenuItem("Tools/Avatar Smart Backup")]
             public static void Open()
@@ -1157,8 +1167,15 @@ namespace AvatarSmartBackup
                     // GENERAL
                     EditorGUILayout.BeginVertical("box");
                     EditorGUILayout.LabelField("General", EditorStyles.boldLabel);
-                    _settings.useProjectSettings = EditorGUILayout.ToggleLeft(new GUIContent("Use project-local settings (override)", "Store settings in ProjectSettings so they travel with the project."), _settings.useProjectSettings);
-                    BackupManager.SaveSettings(_settings); BackupManager.TimerService.InvalidateSettingsCache(); _settings = BackupManager.LoadSettings();
+                    EditorGUI.BeginChangeCheck();
+                    bool newUseProject = EditorGUILayout.ToggleLeft(new GUIContent("Use project-local settings (override)", "Store settings in ProjectSettings so they travel with the project."), _settings.useProjectSettings);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        _settings.useProjectSettings = newUseProject;
+                        BackupManager.SaveSettings(_settings);
+                        BackupManager.TimerService.InvalidateSettingsCache();
+                        _settings = BackupManager.LoadSettings();
+                    }
                     EditorGUILayout.EndVertical();
 
                     // ZIP POLICY
@@ -1237,63 +1254,17 @@ namespace AvatarSmartBackup
                     }
                     EditorGUILayout.EndVertical();
 
-                    // FOLDERS & EXTENSIONS
+                    // FOLDERS & EXTENSIONS (semplificato, con selezione interna al Project)
                     EditorGUILayout.BeginVertical("box");
-                    EditorGUILayout.LabelField("Folders & Extensions", EditorStyles.boldLabel);
-                    EditorGUILayout.LabelField("Include entries can be folder prefixes (e.g., Assets/Avatars/) or extensions (e.g., .prefab).", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField("Folders & Types", EditorStyles.boldLabel);
+                    // Small contained text (not a big helpbox)
+                    EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.LabelField("Add folders from Project or simple extensions (e.g., .prefab).", EditorStyles.miniLabel);
+                    EditorGUILayout.EndVertical();
 
-                    EditorGUILayout.LabelField("Include:");
-                    DrawStringListVertical(_settings.includeFolders, "Add");
-                    EditorGUILayout.BeginHorizontal();
-                    _newIncludePattern = EditorGUILayout.TextField(new GUIContent("Add extension or prefix", "Enter .ext or Assets/..."), _newIncludePattern);
-                    if (GUILayout.Button(new GUIContent("Add", "Add this entry"), GUILayout.Width(60)))
-                    {
-                        var t = (_newIncludePattern ?? string.Empty).Trim();
-                        if (!string.IsNullOrEmpty(t)) { _settings.includeFolders.Add(t); _newIncludePattern = string.Empty; }
-                    }
-                    if (GUILayout.Button(new GUIContent("Add folder…", "Pick a project folder to include"), GUILayout.Width(100)))
-                    {
-                        var abs = EditorUtility.OpenFolderPanel("Select folder to include", FileUtilEx.ProjectRoot, "");
-                        if (!string.IsNullOrEmpty(abs))
-                        {
-                            if (!abs.Replace('\\','/').StartsWith(FileUtilEx.ProjectRoot.Replace('\\','/') + "/", StringComparison.OrdinalIgnoreCase))
-                                EditorUtility.DisplayDialog("Outside project", "Please select a folder inside this Unity project.", "OK");
-                            else
-                            {
-                                string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
-                                if (!rel.EndsWith("/")) rel += "/";
-                                if (!_settings.includeFolders.Contains(rel)) _settings.includeFolders.Add(rel);
-                            }
-                        }
-                    }
-                    EditorGUILayout.EndHorizontal();
-
-                    EditorGUILayout.Space(4);
-                    EditorGUILayout.LabelField("Exclude:");
-                    DrawStringListVertical(_settings.excludeFolders, "Add");
-                    EditorGUILayout.BeginHorizontal();
-                    _newExcludePattern = EditorGUILayout.TextField(new GUIContent("Add extension or prefix", "Enter .ext or Assets/..."), _newExcludePattern);
-                    if (GUILayout.Button(new GUIContent("Add", "Add this entry"), GUILayout.Width(60)))
-                    {
-                        var t = (_newExcludePattern ?? string.Empty).Trim();
-                        if (!string.IsNullOrEmpty(t)) { _settings.excludeFolders.Add(t); _newExcludePattern = string.Empty; }
-                    }
-                    if (GUILayout.Button(new GUIContent("Add folder…", "Pick a project folder to exclude"), GUILayout.Width(100)))
-                    {
-                        var abs = EditorUtility.OpenFolderPanel("Select folder to exclude", FileUtilEx.ProjectRoot, "");
-                        if (!string.IsNullOrEmpty(abs))
-                        {
-                            if (!abs.Replace('\\','/').StartsWith(FileUtilEx.ProjectRoot.Replace('\\','/') + "/", StringComparison.OrdinalIgnoreCase))
-                                EditorUtility.DisplayDialog("Outside project", "Please select a folder inside this Unity project.", "OK");
-                            else
-                            {
-                                string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
-                                if (!rel.EndsWith("/")) rel += "/";
-                                if (!_settings.excludeFolders.Contains(rel)) _settings.excludeFolders.Add(rel);
-                            }
-                        }
-                    }
-                    EditorGUILayout.EndHorizontal();
+                    DrawIncludeExcludeSection("Include", _settings.includeFolders, ref _newIncludePattern, ref _includePrefix, ref _includeFolderObj);
+                    EditorGUILayout.Space(6);
+                    DrawIncludeExcludeSection("Exclude", _settings.excludeFolders, ref _newExcludePattern, ref _excludePrefix, ref _excludeFolderObj);
                     EditorGUILayout.EndVertical();
                 }
 
@@ -1325,6 +1296,92 @@ namespace AvatarSmartBackup
                 }
                 if (remove >= 0) list.RemoveAt(remove);
                 if (GUILayout.Button(addLabel)) list.Add("Assets/");
+            }
+
+            static void DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object folderObj)
+            {
+                EditorGUILayout.LabelField(title + ":", EditorStyles.boldLabel);
+                // Add-area contained in a small box
+                EditorGUILayout.BeginVertical("box");
+                // Add folder (Project picker)
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Folder", GUILayout.Width(60));
+                var newObj = EditorGUILayout.ObjectField(folderObj, typeof(DefaultAsset), false);
+                if (newObj != folderObj) folderObj = newObj;
+                using (new EditorGUI.DisabledScope(folderObj == null))
+                {
+                    if (GUILayout.Button("Add", GUILayout.Width(60)))
+                    {
+                        string p = AssetDatabase.GetAssetPath(folderObj);
+                        if (string.IsNullOrEmpty(p) || !AssetDatabase.IsValidFolder(p))
+                        {
+                            EditorUtility.DisplayDialog("Not a folder", "Please select a folder inside the Project window.", "OK");
+                        }
+                        else
+                        {
+                            if (!p.EndsWith("/")) p += "/";
+                            if (!list.Contains(p)) list.Add(p);
+                            folderObj = null; // clear selection after add
+                        }
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+
+                // Add extension
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Extension", GUILayout.Width(60));
+                newExt = EditorGUILayout.TextField(newExt, GUILayout.ExpandWidth(true));
+                EditorGUILayout.LabelField("e.g. .prefab", EditorStyles.miniLabel, GUILayout.Width(90));
+                if (GUILayout.Button("Add", GUILayout.Width(60)))
+                {
+                    var t = (newExt ?? string.Empty).Trim();
+                    if (t.StartsWith("*")) t = t.Substring(1);
+                    if (!string.IsNullOrEmpty(t))
+                    {
+                        if (!t.StartsWith(".")) t = "." + t;
+                        if (!list.Contains(t)) list.Add(t);
+                        newExt = string.Empty;
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+
+                // Add prefix (Assets/...)
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Prefix", GUILayout.Width(60));
+                newPrefix = EditorGUILayout.TextField(newPrefix, GUILayout.ExpandWidth(true));
+                EditorGUILayout.LabelField("e.g. Assets/SubFolder/", EditorStyles.miniLabel, GUILayout.Width(170));
+                if (GUILayout.Button("Add", GUILayout.Width(60)))
+                {
+                    var t = (newPrefix ?? string.Empty).Trim();
+                    if (!string.IsNullOrEmpty(t))
+                    {
+                        if (!t.EndsWith("/")) t += "/";
+                        if (!list.Contains(t)) list.Add(t);
+                        newPrefix = string.Empty;
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical(); // end add-area box
+
+                DrawThinSeparator();
+
+                // Current entries (below)
+                int remove = -1;
+                for (int i = 0; i < list.Count; i++)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("", GUILayout.Width(2));
+                    list[i] = EditorGUILayout.TextField(list[i], GUILayout.ExpandWidth(true));
+                    if (GUILayout.Button("X", GUILayout.Width(20))) remove = i;
+                    EditorGUILayout.EndHorizontal();
+                }
+                if (remove >= 0) list.RemoveAt(remove);
+            }
+
+            static void DrawThinSeparator()
+            {
+                var rect = EditorGUILayout.GetControlRect(false, 1);
+                EditorGUI.DrawRect(rect, new Color(1f, 1f, 1f, 0.18f));
             }
 
             static void RestoreLatest()
@@ -1422,34 +1479,46 @@ namespace AvatarSmartBackup
             {
                 EditorGUILayout.LabelField("Restore Preview", EditorStyles.boldLabel);
                 EditorGUILayout.HelpBox("Review files to restore. Uncheck items to keep existing project files. You can create a pre-restore backup of current Assets/.", MessageType.Info);
-                // --- summary box: counts per extension and .asset types
+
+                // Summary
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField("Files in backup", EditorStyles.boldLabel);
                 if (_extCounts.Count == 0) EditorGUILayout.LabelField("No files found.");
                 else
                 {
                     EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.BeginVertical(GUILayout.MaxWidth(200));
+                    // By extension
+                    EditorGUILayout.BeginVertical(GUILayout.MaxWidth(220));
+                    EditorGUILayout.LabelField("By extension", EditorStyles.miniBoldLabel);
                     foreach (var kv in _extCounts.OrderByDescending(k => k.Value))
                     {
-                        EditorGUILayout.LabelField($"{kv.Key}", GUILayout.Width(80));
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField(kv.Key.PadRight(8), GUILayout.Width(80));
+                        GUILayout.FlexibleSpace();
                         EditorGUILayout.LabelField(kv.Value.ToString(), GUILayout.Width(40));
+                        EditorGUILayout.EndHorizontal();
                     }
                     EditorGUILayout.EndVertical();
 
-                    // dettagli per .asset
+                    // .asset types
                     EditorGUILayout.BeginVertical();
                     if (_assetTypeCounts.Count > 0)
                     {
-                        EditorGUILayout.LabelField(".asset types:", EditorStyles.boldLabel);
+                        EditorGUILayout.LabelField(".asset types", EditorStyles.miniBoldLabel);
                         foreach (var kv in _assetTypeCounts.OrderByDescending(k => k.Value))
-                            EditorGUILayout.LabelField($"{kv.Key}: {kv.Value}");
+                        {
+                            EditorGUILayout.BeginHorizontal();
+                            EditorGUILayout.LabelField(kv.Key, GUILayout.ExpandWidth(true));
+                            EditorGUILayout.LabelField(kv.Value.ToString(), GUILayout.Width(40));
+                            EditorGUILayout.EndHorizontal();
+                        }
                     }
                     EditorGUILayout.EndVertical();
                     EditorGUILayout.EndHorizontal();
                 }
                 EditorGUILayout.EndVertical();
 
+                // Toolbar
                 EditorGUILayout.BeginHorizontal();
                 bool newSelectAll = EditorGUILayout.ToggleLeft("Select All", _selectAll, GUILayout.Width(100));
                 if (newSelectAll != _selectAll)
@@ -1459,16 +1528,17 @@ namespace AvatarSmartBackup
                 }
                 if (GUILayout.Button("Refresh", GUILayout.Width(80))) LoadFiles();
                 GUILayout.FlexibleSpace();
-                _backupBefore = EditorGUILayout.ToggleLeft("Backup current Assets before restore", _backupBefore, GUILayout.Width(240));
+                _backupBefore = EditorGUILayout.ToggleLeft("Backup current Assets before restore", _backupBefore, GUILayout.Width(260));
                 EditorGUILayout.EndHorizontal();
 
+                // File list
                 EditorGUILayout.Space(6);
                 EditorGUILayout.BeginVertical("box");
-                _scroll = EditorGUILayout.BeginScrollView(_scroll);
+                EditorGUILayout.LabelField($"Items: {_files.Count}    Selected: {_selected.Count(b => b)}", EditorStyles.miniLabel);
+                _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(220));
                 if (_files.Count == 0) EditorGUILayout.LabelField("No files found in Current/ to restore.");
                 for (int i = 0; i < _files.Count; i++)
                 {
-                    // Honor select-all only when toggled above (no per-frame forcing)
                     EditorGUILayout.BeginHorizontal();
                     _selected[i] = EditorGUILayout.Toggle(_selected[i], GUILayout.Width(18));
                     EditorGUILayout.LabelField(_files[i], GUILayout.ExpandWidth(true));
@@ -1477,10 +1547,12 @@ namespace AvatarSmartBackup
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.EndVertical();
 
+                // Bottom bar
                 EditorGUILayout.Space(6);
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Cancel", GUILayout.Height(22))) { Close(); }
-                if (GUILayout.Button("Restore selected", GUILayout.Height(22))) { DoRestore(); }
+                if (GUILayout.Button("Cancel", GUILayout.Height(22), GUILayout.Width(100))) { Close(); }
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Restore selected", GUILayout.Height(22), GUILayout.Width(160))) { DoRestore(); }
                 EditorGUILayout.EndHorizontal();
             }
 
