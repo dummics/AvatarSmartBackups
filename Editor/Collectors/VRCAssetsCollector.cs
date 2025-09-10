@@ -16,14 +16,16 @@ namespace AvatarSmartBackup
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
             foreach (var cand in CommonNames)
             {
-                foreach (var p in Directory.GetFiles(root, cand, SearchOption.AllDirectories))
+                var matches = Directory.GetFiles(root, cand, SearchOption.AllDirectories);
+                foreach (var p in matches)
                 {
                     var rel = FileUtilEx.MakeRelToProject(p).Replace("\\", "/");
                     if (CollectHelpers.PassesFolderFilters(rel, s)) yield return p;
                 }
             }
 
-            foreach (var p in Directory.GetFiles(root, "*.asset", SearchOption.AllDirectories))
+            var allAssets = Directory.GetFiles(root, "*.asset", SearchOption.AllDirectories);
+            foreach (var p in allAssets)
             {
                 string fn = Path.GetFileName(p);
                 if (fn.IndexOf("VRCExpression", StringComparison.OrdinalIgnoreCase) >= 0)

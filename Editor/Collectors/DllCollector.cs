@@ -12,7 +12,8 @@ namespace AvatarSmartBackup
             if (!s.incDlls) yield break;
             long maxBytes = Math.Max(128, s.dllsMaxKB) * 1024L;
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
-            foreach (var p in Directory.GetFiles(root, "*.dll", SearchOption.AllDirectories))
+            var files = Directory.GetFiles(root, "*.dll", SearchOption.AllDirectories);
+            foreach (var p in files)
             {
                 string rel = FileUtilEx.MakeRelToProject(p).Replace("\\", "/");
                 if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;

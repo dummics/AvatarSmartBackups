@@ -111,6 +111,10 @@ namespace AvatarSmartBackup
         {
             var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var inc = IncrementalCollector.ConsumeChanges()?.ToArray() ?? Array.Empty<string>();
+            if (inc.Length > 0 && s?.debugMode == true)
+            {
+                Log.Info($"IncrementalCollector: {inc.Length} changes consumed");
+            }
             bool haveInc = inc.Length > 0;
             if (haveInc)
             {
@@ -132,6 +136,11 @@ namespace AvatarSmartBackup
                 foreach (var c in Collectors)
                     foreach (var abs in c.CollectAbsolutePaths(s))
                         if (File.Exists(abs)) set.Add(abs);
+            }
+
+            if (s?.debugMode == true)
+            {
+                Log.Info($"BuildCopyPlan: initial candidate count: {set.Count}");
             }
 
             set.RemoveWhere(p => !FileUtilEx.MakeRelToProject(p).Replace("\\", "/").StartsWith("Assets/", StringComparison.OrdinalIgnoreCase));
@@ -234,6 +243,10 @@ namespace AvatarSmartBackup
                     ProgressUX.Report(progId, (float)i / set.Count, $"Planning {i}/{set.Count}");
             }
 
+            if (s?.debugMode == true)
+            {
+                Log.Info($"BuildCopyPlan: planned copyJobs={copyJobs.Count} copied={copied} skipped={skipped} totalEntries={man.entries.Count} totalBytes={totalBytes}");
+            }
             return (copyJobs, man, totalBytes, copied, skipped);
         }
 
@@ -242,6 +255,7 @@ namespace AvatarSmartBackup
         static int _busy;
         static int _pendingRun;
         static int _benchBusy;
+        static long _lastManualBenchmarkTicks = 0; // Anti-spam for manual benchmark
         internal static bool IsBusy => _busy == 1;
         internal static void QueuePendingRun() => Interlocked.Exchange(ref _pendingRun, 1);
 
@@ -260,6 +274,19 @@ namespace AvatarSmartBackup
                     Interlocked.Exchange(ref _pendingRun, 1);
                     return;
                 }
+
+                // Anti-spam protection: prevent backup runs closer than 3 seconds apart unless forced
+                if (reason != "timer" && !forceZip)
+                {
+                    var lastBackup = Session.LastBackupUtc;
+                    if (lastBackup.HasValue && (DateTime.UtcNow - lastBackup.Value).TotalSeconds < 3)
+                    {
+                        Log.Warn($"Backup anti-spam: ignoring {reason} request (last backup {(DateTime.UtcNow - lastBackup.Value).TotalSeconds:0.1}s ago)");
+                        Interlocked.Exchange(ref _busy, 0);
+                        return;
+                    }
+                }
+
                 await _one.WaitAsync();
 
                 await EnsureBenchmarkAsync(s);
@@ -283,8 +310,10 @@ namespace AvatarSmartBackup
                 if (s.saveScenesBeforeBackup) SaveOpenScenesIfDirty();
 
                 // 1) Scan e costruzione job (background)
+                // Clone settings for the scan to avoid races if the user edits UI while scanning.
+                var scanSettings = JsonUtility.FromJson<BackupSettings>(JsonUtility.ToJson(s));
                 int scanId = showProgressUI ? ProgressUX.Start("Avatar Smart Backup", "Scanning project", false) : -1;
-                var plan = await Task.Run(() => BuildCopyPlan(s, scanId));
+                var plan = await Task.Run(() => BuildCopyPlan(scanSettings, scanId));
                 ProgressUX.Finish(scanId);
                 var copyJobs = plan.jobs;
                 var man = plan.manifest;
@@ -316,7 +345,7 @@ namespace AvatarSmartBackup
                                     using var src = new FileStream(job.src, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                                     string tmp = job.dst + ".tmp";
                                     using (var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
-                                        IOThrottle.CopyStreamThrottled(src, dst, bufferBytes: 2 * 1024 * 1024, maxMBps: EffectiveCopyMBps(s), ct: cts.Token);
+                                        IOThrottle.CopyStreamThrottled(src, dst, bufferBytes: 2 * 1024 * 1024, maxMBps: copyCap, ct: cts.Token);
                                     FileUtilEx.AtomicReplace(tmp, job.dst);
                                 }
                                 catch (Exception ex)
@@ -422,10 +451,7 @@ namespace AvatarSmartBackup
                 {
                     RunBackupNow(s, showToast, reason, showProgressUI, forceZip);
                 }
-                else if (Session.IsRunning)
-                {
-                    MainThread.Invoke(() => TimerService.ScheduleNextRun(s));
-                }
+                // Next run already scheduled by TimerService before starting this backup
             }
         }
 
@@ -440,6 +466,7 @@ namespace AvatarSmartBackup
             }
             keep.Add("manifest.json"); keep.Add("backup.ok");
             var all = Directory.Exists(CurrentDir) ? Directory.GetFiles(CurrentDir, "*", SearchOption.AllDirectories) : Array.Empty<string>();
+            int pruned = 0;
             foreach (var abs in all)
             {
                 string rel = MakeRelTo(abs, CurrentDir).Replace("\\", "/");
@@ -449,6 +476,7 @@ namespace AvatarSmartBackup
                     {
                         System.Diagnostics.Debug.Assert(abs.StartsWith(CurrentDir, StringComparison.OrdinalIgnoreCase));
                         File.Delete(abs);
+                        pruned++;
                     }
                     catch { }
                 }
@@ -456,19 +484,49 @@ namespace AvatarSmartBackup
             foreach (var d in Directory.GetDirectories(CurrentDir, "*", SearchOption.AllDirectories))
                 if (!Directory.EnumerateFileSystemEntries(d).Any())
                     try { Directory.Delete(d, true); } catch { }
+
+            if (newMan != null && newMan.entries != null && newMan.entries.Count > 0)
+            {
+                // Find an example entry for debug reporting
+                if (newMan.entries.Count > 0 && newMan.entries[0] != null && newMan.entries[0].relPath != null)
+                {
+                    // no-op placeholder to access newMan in debug
+                }
+            }
+            // Log pruning activity in debug mode
+            if (newMan != null && newMan.entries != null && newMan.entries.Count >= 0)
+            {
+                // If debug mode is enabled in settings, try to read it and log
+                try
+                {
+                    var s = LoadSettings();
+                    if (s?.debugMode == true)
+                    {
+                        Log.Info($"PruneRemoved: pruned files={pruned}");
+                    }
+                }
+                catch { }
+            }
         }
-        static string MakeRelTo(string p, string root)
+        public static string MakeRelTo(string p, string root)
         {
             var pu = new Uri(Path.GetFullPath(p));
             var ru = new Uri(Path.GetFullPath(root) + Path.DirectorySeparatorChar);
             return Uri.UnescapeDataString(ru.MakeRelativeUri(pu).ToString()).Replace('/', Path.DirectorySeparatorChar);
         }
 
-        static int EffectiveCopyMBps(BackupSettings s)
+        public static int EffectiveCopyMBps(BackupSettings s)
         {
             if (s.autoThrottle && s.lastMeasuredMBps > 0f)
                 return Math.Max(1, (int)(s.lastMeasuredMBps * 0.7f));
             return s.copyMaxMBps;
+        }
+
+        public static int EffectiveZipMBps(BackupSettings s)
+        {
+            if (s.autoThrottle && s.lastMeasuredMBps > 0f)
+                return Math.Max(1, (int)(s.lastMeasuredMBps * 0.7f));
+            return s.zipMaxMBps;
         }
 
         static async Task WaitForIdleSeconds(int seconds)
@@ -479,31 +537,74 @@ namespace AvatarSmartBackup
 
         static readonly TimeSpan BenchmarkEvery = TimeSpan.FromHours(24);
 
-        static async Task EnsureBenchmarkAsync(BackupSettings s)
+        public static async Task EnsureBenchmarkAsync(BackupSettings s)
         {
+            // Run benchmark only if auto-throttle is enabled and not already run this Editor session.
             if (!s.autoThrottle) return;
-            DateTime last = s.lastBenchmarkTicks > 0 ? new DateTime(s.lastBenchmarkTicks, DateTimeKind.Utc) : DateTime.MinValue;
-            if (s.lastMeasuredMBps <= 0f || DateTime.UtcNow - last > BenchmarkEvery)
+            const string SessionKey = "ASB_BenchDoneThisSession";
+            try
             {
-                if (Interlocked.Exchange(ref _benchBusy, 1) == 1) return;
-                try
-                {
-                    float mbps = await RunBenchmarkAsync();
-                    if (mbps > 0f)
-                    {
-                        s.lastMeasuredMBps = mbps;
-                        s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
-                        SaveSettings(s);
-                        TimerService.InvalidateSettingsCache();
-                        Log.Info($"Disk throughput benchmark: {mbps:0.0} MB/s");
-                    }
-                }
-                finally { _benchBusy = 0; }
+                if (UnityEditor.SessionState.GetBool(SessionKey, false)) return;
             }
+            catch { /* ignore if SessionState unavailable */ }
+
+            if (Interlocked.Exchange(ref _benchBusy, 1) == 1) return;
+            try
+            {
+                float mbps = await RunBenchmarkAsync();
+                if (mbps > 0f)
+                {
+                    s.lastMeasuredMBps = mbps;
+                    s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
+                    SaveSettings(s);
+                    TimerService.InvalidateSettingsCache();
+                    Log.Info($"Disk throughput benchmark: {mbps:0.0} MB/s");
+                }
+                try { UnityEditor.SessionState.SetBool(SessionKey, true); } catch { }
+            }
+            finally { _benchBusy = 0; }
+        }
+
+        public static async Task RunManualBenchmarkAsync(BackupSettings s)
+        {
+            // Anti-spam: limit manual benchmark to once every 5 seconds
+            long now = DateTime.UtcNow.Ticks;
+            long lastTicks = Interlocked.Read(ref _lastManualBenchmarkTicks);
+            if (now - lastTicks < TimeSpan.FromSeconds(5).Ticks)
+            {
+                Log.Warn("Manual benchmark cooldown active (5s). Please wait.");
+                return;
+            }
+            Interlocked.Exchange(ref _lastManualBenchmarkTicks, now);
+
+            if (Interlocked.Exchange(ref _benchBusy, 1) == 1)
+            {
+                Log.Warn("Benchmark already running.");
+                return;
+            }
+            try
+            {
+                Log.Info("Running manual benchmark...");
+                float mbps = await RunBenchmarkAsync();
+                if (mbps > 0f)
+                {
+                    s.lastMeasuredMBps = mbps;
+                    s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
+                    SaveSettings(s);
+                    TimerService.InvalidateSettingsCache();
+                    Log.Info($"Manual benchmark result: {mbps:0.0} MB/s");
+                }
+                else
+                {
+                    Log.Warn("Manual benchmark failed to produce valid result.");
+                }
+            }
+            finally { _benchBusy = 0; }
         }
 
         static Task<float> RunBenchmarkAsync()
         {
+            // Limit benchmark runtime to avoid spamming the disk; prefer short test (~2s max).
             return Task.Run(() =>
             {
                 try
@@ -511,22 +612,62 @@ namespace AvatarSmartBackup
                     string dir = Path.Combine(Path.GetTempPath(), "ASB_Bench");
                     Directory.CreateDirectory(dir);
                     string a = Path.Combine(dir, "a.tmp");
-                    string b = Path.Combine(dir, "b.tmp");
-                    int sizeMB = 32;
+                    int sizeMB = 32; // max target size, but we may stop early due to timeout
                     byte[] buf = new byte[1024 * 1024];
-                    using (var fs = new FileStream(a, FileMode.Create, FileAccess.Write, FileShare.None))
-                        for (int i = 0; i < sizeMB; i++) fs.Write(buf, 0, buf.Length);
-                    var sw = Stopwatch.StartNew();
-                    File.Copy(a, b, true);
-                    sw.Stop();
-                    double copy = sizeMB / Math.Max(0.0001, sw.Elapsed.TotalSeconds);
-                    sw.Restart();
-                    using (var fr = new FileStream(b, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        while (fr.Read(buf, 0, buf.Length) > 0) { }
-                    sw.Stop();
-                    double read = sizeMB / Math.Max(0.0001, sw.Elapsed.TotalSeconds);
-                    try { File.Delete(a); File.Delete(b); Directory.Delete(dir); } catch { }
-                    return (float)Math.Min(copy, read);
+
+                    using (var cts = new CancellationTokenSource(2000)) // 2000 ms timeout
+                    {
+                        var sw = Stopwatch.StartNew();
+                        long writtenBytes = 0;
+                        try
+                        {
+                            using (var fs = new FileStream(a, FileMode.Create, FileAccess.Write, FileShare.None))
+                            {
+                                for (int i = 0; i < sizeMB; i++)
+                                {
+                                    if (cts.IsCancellationRequested) break;
+                                    fs.Write(buf, 0, buf.Length);
+                                    writtenBytes += buf.Length;
+                                }
+                                fs.Flush();
+                            }
+                        }
+                        catch (OperationCanceledException) { }
+                        sw.Stop();
+
+                        double writeSec = Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                        double writtenMB = writtenBytes / (1024.0 * 1024.0);
+                        double writeMbps = writtenMB / writeSec;
+
+                        // Read back what we wrote (or as much as possible before timeout)
+                        sw.Restart();
+                        long readBytes = 0;
+                        try
+                        {
+                            using (var fr = new FileStream(a, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            {
+                                int r;
+                                while ((r = fr.Read(buf, 0, buf.Length)) > 0)
+                                {
+                                    if (cts.IsCancellationRequested) break;
+                                    readBytes += r;
+                                }
+                            }
+                        }
+                        catch (OperationCanceledException) { }
+                        sw.Stop();
+
+                        double readSec = Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                        double readMB = readBytes / (1024.0 * 1024.0);
+                        double readMbps = readMB / readSec;
+
+                        try { File.Delete(a); Directory.Delete(dir); } catch { }
+
+                        // If we couldn't measure anything, return 0
+                        if (writtenMB <= 0.0 || readMB <= 0.0) return 0f;
+                        float result = (float)Math.Min(writeMbps, readMbps);
+                        return result;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -534,6 +675,17 @@ namespace AvatarSmartBackup
                     return 0f;
                 }
             });
+        }
+
+        static string HumanMB(long bytes)
+        {
+            try
+            {
+                double mb = bytes / (1024.0 * 1024.0);
+                if (mb >= 1000) return (mb / 1024.0).ToString("0.0") + " GB";
+                return mb.ToString("0.0") + " MB";
+            }
+            catch { return bytes + " bytes"; }
         }
 
     }

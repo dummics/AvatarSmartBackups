@@ -127,15 +127,15 @@ namespace AvatarSmartBackup
                 _settings.autoThrottle = EditorGUILayout.ToggleLeft(new GUIContent("Auto throttle (recommended)", "Automatically caps IO speed to keep the editor responsive."), _settings.autoThrottle);
                 _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Max parallel threads", "Number of concurrent copy/hash tasks."), _settings.maxParallelThreads), 1, Math.Max(1, System.Environment.ProcessorCount));
                 _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
-                if (_settings.lastMeasuredMBps > 0f)
-                    EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
-                if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150)))
+                // Show measured throughput and re-run button only in debug mode (to avoid repeated disk activity)
+                if (_settings.debugMode)
                 {
-                    _settings.lastMeasuredMBps = 0f;
-                    _settings.lastBenchmarkTicks = 0;
-                    BackupManager.SaveSettings(_settings);
-                    TimerService.InvalidateSettingsCache();
-                    _ = BackupManager.EnsureBenchmarkAsync(_settings);
+                    if (_settings.lastMeasuredMBps > 0f)
+                        EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
+                    if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150)))
+                    {
+                        _ = BackupManager.RunManualBenchmarkAsync(_settings);
+                    }
                 }
                 EditorGUILayout.EndVertical();
     

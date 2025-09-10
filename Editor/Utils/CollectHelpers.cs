@@ -17,10 +17,16 @@ namespace AvatarSmartBackup
 
         public static bool PassesFolderFilters(string assetPath, BackupSettings s)
         {
-            if (!assetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) return false;
-            if (s.includeFolders != null && s.includeFolders.Count > 0)
+            if (!assetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
             {
-                bool any = s.includeFolders.Any(f =>
+                if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected (not under Assets/)");
+                return false;
+            }
+            // Snapshot lists to avoid collection-modified exceptions when UI may change them concurrently
+            var includes = s.includeFolders != null ? s.includeFolders.ToArray() : Array.Empty<string>();
+            if (includes.Length > 0)
+            {
+                bool any = includes.Any(f =>
                 {
                     var t = (f ?? string.Empty).Trim();
                     if (string.IsNullOrEmpty(t)) return false;
@@ -29,16 +35,26 @@ namespace AvatarSmartBackup
                     // Treat entries like ".anim" or "*.anim" as extension filters
                     return MatchesExt(assetPath, t);
                 });
-                if (!any) return false;
+                if (!any)
+                {
+                    if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected by includeFolders (no include matched)");
+                    return false;
+                }
             }
-            if (s.excludeFolders != null && s.excludeFolders.Any(f =>
+
+            var excludes = s.excludeFolders != null ? s.excludeFolders.ToArray() : Array.Empty<string>();
+            if (excludes.Any(f =>
             {
                 var t = (f ?? string.Empty).Trim();
                 if (string.IsNullOrEmpty(t)) return false;
                 if (t.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
                     return assetPath.StartsWith(t, StringComparison.OrdinalIgnoreCase);
                 return MatchesExt(assetPath, t);
-            })) return false;
+            }))
+            {
+                if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected by excludeFolders");
+                return false;
+            }
             return true;
         }
     }

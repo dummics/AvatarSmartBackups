@@ -12,11 +12,13 @@ namespace AvatarSmartBackup
             if (!s.incMaterials) yield break;
             long maxBytes = Math.Max(10, s.materialsMaxKB) * 1024L;
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
-            foreach (var abs in Directory.GetFiles(root, "*.mat", SearchOption.AllDirectories))
+            var files = Directory.GetFiles(root, "*.mat", SearchOption.AllDirectories);
+            foreach (var abs in files)
             {
                 string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
                 if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;
-                if (new FileInfo(abs).Length <= maxBytes) yield return abs;
+                var fi = new FileInfo(abs);
+                if (fi.Length <= maxBytes) yield return abs;
             }
         }
     }

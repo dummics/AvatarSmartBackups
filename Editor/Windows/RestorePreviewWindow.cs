@@ -3,6 +3,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
@@ -37,7 +38,7 @@ namespace AvatarSmartBackup
             if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
             foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
             {
-                string rel = MakeRelTo(src, srcRoot).Replace("\\", "/");
+                string rel = BackupManager.MakeRelTo(src, srcRoot).Replace("\\", "/");
                 if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
                 if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue;
                 _files.Add(rel);
@@ -84,10 +85,10 @@ namespace AvatarSmartBackup
             else
             {
                 EditorGUILayout.BeginHorizontal();
-                // By extension
+                    // By extension
                 EditorGUILayout.BeginVertical(GUILayout.MaxWidth(220));
                 EditorGUILayout.LabelField("By extension", EditorStyles.miniBoldLabel);
-                foreach (var kv in _extCounts.OrderByDescending(k => k.Value))
+                    foreach (var kv in _extCounts.OrderByDescending(k => k.Value))
                 {
                     EditorGUILayout.BeginHorizontal();
                     EditorGUILayout.LabelField(kv.Key.PadRight(8), GUILayout.Width(80));
@@ -140,7 +141,7 @@ namespace AvatarSmartBackup
                 visibleIdx.Add(i);
             }
             int selCount = visibleIdx.Count(idx => _selected[idx]);
-            EditorGUILayout.LabelField($"Items: {visibleIdx.Count}    Selected: {selCount}", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField($"Items: {visibleIdx.Count}    Selected: {selCount}", EditorStyles.miniLabel);
             _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(220));
             if (visibleIdx.Count == 0) EditorGUILayout.LabelField("No files found in Current/ to restore.");
             foreach (var i in visibleIdx)

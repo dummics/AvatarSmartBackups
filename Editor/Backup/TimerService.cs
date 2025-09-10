@@ -78,6 +78,8 @@ namespace AvatarSmartBackup
                 }
                 else
                 {
+                    // Schedule the next run BEFORE starting backup to avoid tight loop
+                    ScheduleNext(now + GetInterval(s));
                     BackupManager.RunBackupNow(s, showToast: false, reason: "timer", showProgressUI: false);
                 }
             }

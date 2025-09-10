@@ -10,7 +10,8 @@ namespace AvatarSmartBackup
         {
             if (!s.incAnimationClips) yield break;
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
-            foreach (var abs in Directory.GetFiles(root, "*.anim", SearchOption.AllDirectories))
+            var files = Directory.GetFiles(root, "*.anim", SearchOption.AllDirectories);
+            foreach (var abs in files)
             {
                 string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
                 if (CollectHelpers.PassesFolderFilters(rel, s)) yield return abs;

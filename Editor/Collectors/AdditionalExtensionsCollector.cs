@@ -12,9 +12,10 @@ namespace AvatarSmartBackup
         public IEnumerable<string> CollectAbsolutePaths(BackupSettings s)
         {
             var exts = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (s?.includeFolders != null)
+            var includes = s?.includeFolders != null ? s.includeFolders.ToArray() : Array.Empty<string>();
+            if (includes.Length > 0)
             {
-                foreach (var e in s.includeFolders)
+                foreach (var e in includes)
                 {
                     if (string.IsNullOrEmpty(e)) continue;
                     string t = e.Trim();
@@ -24,13 +25,17 @@ namespace AvatarSmartBackup
                     exts.Add(t);
                 }
             }
-            if (exts.Count == 0) yield break;
+            if (exts.Count == 0)
+            {
+                if (s?.debugMode == true) Log.Info("AdditionalExtensionsCollector: no extension patterns found in includeFolders");
+                yield break;
+            }
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
             // Decide search roots
             var folderRoots = new List<string>();
             if (s.extWithinIncludeFolders && s.includeFolders != null)
             {
-                foreach (var f in s.includeFolders)
+                foreach (var f in includes)
                 {
                     if (string.IsNullOrEmpty(f)) continue;
                     string t = f.Trim();
@@ -46,7 +51,8 @@ namespace AvatarSmartBackup
                 string pattern = "*" + ext;
                 foreach (var baseRoot in folderRoots)
                 {
-                    foreach (var abs in Directory.GetFiles(baseRoot, pattern, SearchOption.AllDirectories))
+                    var matches = Directory.GetFiles(baseRoot, pattern, SearchOption.AllDirectories);
+                    foreach (var abs in matches)
                     {
                         string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
                         if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;
