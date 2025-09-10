@@ -176,7 +176,7 @@ namespace AvatarSmartBackup
         public int zipMaxMBps = 150;                   // Manual cap (MB/s). 0 = unlimited
         public int maxParallelThreads = Math.Max(1, Environment.ProcessorCount);
 
-        public bool saveScenesBeforeBackup = true;    // Avoid blocking by default
+        public bool saveScenesBeforeBackup = false;    // Avoid blocking by default
 
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
@@ -1346,7 +1346,15 @@ namespace AvatarSmartBackup
 
             static void DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object folderObj)
             {
-                EditorGUILayout.LabelField(title + ":", EditorStyles.boldLabel);
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(title + $":  (" + list.Count + ")", EditorStyles.boldLabel);
+                GUILayout.FlexibleSpace();
+                using (new EditorGUI.DisabledScope(list.Count == 0))
+                {
+                    if (GUILayout.Button(new GUIContent("Clear", "Remove all entries from this list"), GUILayout.Width(60)))
+                        list.Clear();
+                }
+                EditorGUILayout.EndHorizontal();
                 // Add-area contained in a small box
                 EditorGUILayout.BeginVertical("box");
                 // Add folder (Project picker)
