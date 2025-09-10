@@ -1,7 +1,7 @@
 {
   "name": "dum.incb.system",
   "displayName": "Avatar Smart Backup",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "unity": "2022.3",
   "description": "Incremental backup for VRChat projects.",
   "keywords": [ "backup", "vrchat", "avatar" ],
