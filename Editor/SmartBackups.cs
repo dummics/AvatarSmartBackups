@@ -180,6 +180,9 @@ namespace AvatarSmartBackup
 
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
+
+        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
+        public bool extWithinIncludeFolders = true;
     }
 
     internal static class SessionKeys
@@ -446,14 +449,32 @@ namespace AvatarSmartBackup
             }
             if (exts.Count == 0) yield break;
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
+            // Decide search roots
+            var folderRoots = new List<string>();
+            if (s.extWithinIncludeFolders && s.includeFolders != null)
+            {
+                foreach (var f in s.includeFolders)
+                {
+                    if (string.IsNullOrEmpty(f)) continue;
+                    string t = f.Trim();
+                    if (!t.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
+                    string abs = Path.Combine(FileUtilEx.ProjectRoot, t.Replace('/', Path.DirectorySeparatorChar));
+                    if (Directory.Exists(abs)) folderRoots.Add(abs);
+                }
+            }
+            if (folderRoots.Count == 0) folderRoots.Add(Path.Combine(FileUtilEx.ProjectRoot, "Assets"));
+
             foreach (var ext in exts)
             {
                 string pattern = "*" + ext;
-                foreach (var abs in Directory.GetFiles(root, pattern, SearchOption.AllDirectories))
+                foreach (var baseRoot in folderRoots)
                 {
-                    string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
-                    if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;
-                    yield return abs;
+                    foreach (var abs in Directory.GetFiles(baseRoot, pattern, SearchOption.AllDirectories))
+                    {
+                        string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                        if (!CollectHelpers.PassesFolderFilters(rel, s)) continue;
+                        yield return abs;
+                    }
                 }
             }
         }
@@ -592,10 +613,10 @@ namespace AvatarSmartBackup
         static int _busy;
 
         // API pubblica
-        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null, bool showProgressUI = true)
-            => _ = RunBackupNowAsync(s, showToast, reason, showProgressUI);
+        public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null, bool showProgressUI = true, bool forceZip = false)
+            => _ = RunBackupNowAsync(s, showToast, reason, showProgressUI, forceZip);
 
-        public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason, bool showProgressUI)
+        public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason, bool showProgressUI, bool forceZip)
         {
             try
             {
@@ -794,7 +815,7 @@ namespace AvatarSmartBackup
                 });
 
                 // 4) Zip Policy
-                bool shouldZip = ShouldCreateZip(s, hadChanges: copied > 0);
+                bool shouldZip = forceZip || ShouldCreateZip(s, hadChanges: copied > 0);
                 if (shouldZip)
                 {
                     var ctsZip = new CancellationTokenSource();
@@ -997,6 +1018,23 @@ namespace AvatarSmartBackup
             }, ct);
         }
 
+        public static void CreateSnapshotNow(BackupSettings s)
+        {
+            try
+            {
+                string srcRoot = CurrentDir;
+                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Snapshot", "No Current/ backup found. Run a backup first.", "OK"); return; }
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Snapshot", "Backup in progress or not complete. Try again after it finishes.", "OK"); return; }
+                var cts = new CancellationTokenSource();
+                _ = CreateZipAsync(s, cts.Token, cts, showUI: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Err("Snapshot error: " + ex.Message);
+            }
+        }
+
 
 
         [InitializeOnLoad]
@@ -1068,7 +1106,10 @@ namespace AvatarSmartBackup
                 {
                     var sNow = GetSettingsCached();
                     if (state == PlayModeStateChange.ExitingEditMode && sNow.backupOnPlayEnter)
-                        BackupManager.RunBackupNow(sNow, showToast: false, reason: "play-enter", showProgressUI: false);
+                    {
+                        bool forceZip = (sNow.zipPolicy == ZipPolicy.OnPlay);
+                        BackupManager.RunBackupNow(sNow, showToast: false, reason: "play-enter", showProgressUI: false, forceZip: forceZip);
+                    }
                 };
             }
 
@@ -1159,7 +1200,10 @@ namespace AvatarSmartBackup
 
                 // Pulsanti verticali
                 if (GUILayout.Button(new GUIContent("Backup Now", "Start a backup immediately (non-blocking)."))) BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button(new GUIContent("Create Snapshot Now", "Create a .zip snapshot from the current backup content."))) BackupManager.CreateSnapshotNow(_settings);
                 if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the folder where backups are stored."))) EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
+                EditorGUILayout.EndHorizontal();
 
                 _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, "Advanced Settings");
                 if (_settings.showAdvanced)
@@ -1195,6 +1239,7 @@ namespace AvatarSmartBackup
                         _settings.zipDailyHour = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Hour (0-23)", "Daily zip time (hour)."), _settings.zipDailyHour), 0, 23);
                         _settings.zipDailyMinute = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Minutes", "Daily zip time (minutes)."), _settings.zipDailyMinute), 0, 59);
                     }
+                    _settings.keepSnapshots = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Keep last snapshots", "How many .zip snapshots to keep in the Archive folder (1 disables snapshots)."), _settings.keepSnapshots), 1, 50);
                     _settings.zipFastest = EditorGUILayout.ToggleLeft(new GUIContent("Compression level: Fastest (quicker)", "Fastest is quicker but larger archives. Untick for Optimal (smaller, slower)."), _settings.zipFastest);
                     EditorGUILayout.EndVertical();
 
@@ -1255,12 +1300,13 @@ namespace AvatarSmartBackup
                     EditorGUILayout.EndVertical();
 
                     // FOLDERS & EXTENSIONS (semplificato, con selezione interna al Project)
-                    EditorGUILayout.BeginVertical("box");
-                    EditorGUILayout.LabelField("Folders & Types", EditorStyles.boldLabel);
-                    // Small contained text (not a big helpbox)
-                    EditorGUILayout.BeginVertical("box");
-                    EditorGUILayout.LabelField("Add folders from Project or simple extensions (e.g., .prefab).", EditorStyles.miniLabel);
-                    EditorGUILayout.EndVertical();
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField("Folders & Types", EditorStyles.boldLabel);
+                // Small contained text (not a big helpbox)
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField("Add folders from Project or simple extensions (e.g., .prefab).", EditorStyles.miniLabel);
+                _settings.extWithinIncludeFolders = EditorGUILayout.ToggleLeft(new GUIContent("Apply extensions only within included folders", "When enabled, extensions like .prefab are searched only inside the folders you included."), _settings.extWithinIncludeFolders);
+                EditorGUILayout.EndVertical();
 
                     DrawIncludeExcludeSection("Include", _settings.includeFolders, ref _newIncludePattern, ref _includePrefix, ref _includeFolderObj);
                     EditorGUILayout.Space(6);
@@ -1419,6 +1465,7 @@ namespace AvatarSmartBackup
             List<bool> _selected = new List<bool>();
             bool _selectAll = true;
             bool _backupBefore = true;
+            bool _hideMeta = true;
             Dictionary<string,int> _extCounts = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
             Dictionary<string,int> _assetTypeCounts = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
 
@@ -1528,16 +1575,25 @@ namespace AvatarSmartBackup
                 }
                 if (GUILayout.Button("Refresh", GUILayout.Width(80))) LoadFiles();
                 GUILayout.FlexibleSpace();
+                _hideMeta = EditorGUILayout.ToggleLeft("Hide .meta", _hideMeta, GUILayout.Width(100));
                 _backupBefore = EditorGUILayout.ToggleLeft("Backup current Assets before restore", _backupBefore, GUILayout.Width(260));
                 EditorGUILayout.EndHorizontal();
 
                 // File list
                 EditorGUILayout.Space(6);
                 EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField($"Items: {_files.Count}    Selected: {_selected.Count(b => b)}", EditorStyles.miniLabel);
-                _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(220));
-                if (_files.Count == 0) EditorGUILayout.LabelField("No files found in Current/ to restore.");
+                // Build filtered index map
+                var visibleIdx = new List<int>(_files.Count);
                 for (int i = 0; i < _files.Count; i++)
+                {
+                    if (_hideMeta && _files[i].EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                    visibleIdx.Add(i);
+                }
+                int selCount = visibleIdx.Count(idx => _selected[idx]);
+                EditorGUILayout.LabelField($"Items: {visibleIdx.Count}    Selected: {selCount}", EditorStyles.miniLabel);
+                _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(220));
+                if (visibleIdx.Count == 0) EditorGUILayout.LabelField("No files found in Current/ to restore.");
+                foreach (var i in visibleIdx)
                 {
                     EditorGUILayout.BeginHorizontal();
                     _selected[i] = EditorGUILayout.Toggle(_selected[i], GUILayout.Width(18));
