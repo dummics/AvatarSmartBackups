@@ -26,25 +26,6 @@ namespace AvatarSmartBackup
         OnPlay    // take a snapshot when entering Play Mode
     }
 
-    [Serializable]
-    public class ManifestEntry
-    {
-        public string guid;
-        public string relPath;  // Assets/...
-        public string md5;
-        public long size;
-        public long lastWriteUtcTicks;
-    }
-
-    [Serializable]
-    public class BackupManifest
-    {
-        public string projectName;
-        public string unityVersion;
-        public string createdUtc;
-        public List<ManifestEntry> entries = new List<ManifestEntry>();
-    }
-
     internal interface IBackupCollector { IEnumerable<string> CollectAbsolutePaths(BackupSettings s); }
     // === Collectors (come prima) ===
     internal class VRCAssetsCollector : IBackupCollector
