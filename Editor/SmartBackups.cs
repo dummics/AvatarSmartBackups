@@ -47,9 +47,32 @@ namespace AvatarSmartBackup
     internal static class Log
     {
         const string Tag = "[ Avatar Backup System ] ";
-        public static void Info(string msg) => UnityEngine.Debug.Log(Tag + msg);
-        public static void Warn(string msg) => UnityEngine.Debug.LogWarning(Tag + msg);
-        public static void Err(string msg) => UnityEngine.Debug.LogError(Tag + msg);
+        static readonly string FilePath = Path.Combine(FileUtilEx.BackupRoot, "asb.log");
+        static void Write(string level, string msg)
+        {
+            string line = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} [{level}] {msg}";
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
+                File.AppendAllText(FilePath, line + Environment.NewLine);
+            }
+            catch { }
+        }
+        public static void Info(string msg)
+        {
+            UnityEngine.Debug.Log(Tag + msg);
+            Write("INFO", msg);
+        }
+        public static void Warn(string msg)
+        {
+            UnityEngine.Debug.LogWarning(Tag + msg);
+            Write("WARN", msg);
+        }
+        public static void Err(string msg)
+        {
+            UnityEngine.Debug.LogError(Tag + msg);
+            Write("ERROR", msg);
+        }
     }
 
     internal static class ProgressUX
@@ -138,13 +161,44 @@ namespace AvatarSmartBackup
         }
     }
 
-    public enum ZipPolicy { OnChange, EveryN, Manual, DailyHHMM, OnPlay }
+    // Tracks editor activity (input, compilation, playmode) to detect idle periods
+    internal static class EditorIdle
+    {
+        static double _lastActivity = EditorApplication.timeSinceStartup;
+        static EditorIdle()
+        {
+            EditorApplication.update += Update;
+        }
+        static void Update()
+        {
+            if (UnityEngine.Input.anyKey ||
+                UnityEngine.Input.GetMouseButton(0) ||
+                UnityEngine.Input.GetMouseButton(1) ||
+                UnityEngine.Input.GetMouseButton(2) ||
+                EditorApplication.isCompiling ||
+                EditorApplication.isUpdating ||
+                EditorApplication.isPlayingOrWillChangePlaymode)
+            {
+                _lastActivity = EditorApplication.timeSinceStartup;
+            }
+        }
+        public static double TimeSinceLastActivity => EditorApplication.timeSinceStartup - _lastActivity;
+    }
+
+    // Zip snapshot creation policy
+    public enum ZipPolicy
+    {
+        OnChange, // create a snapshot only when files changed
+        Idle,     // create a snapshot when no changes were detected
+        OnPlay    // take a snapshot when entering Play Mode
+    }
 
     [Serializable]
     public class BackupSettings
     {
         public bool autoRunOnLoad = true;
         public int intervalMinutes = 10;
+        public bool debugMode = false;
         public int keepSnapshots = 3;
         public bool backupOnPlayEnter = true;
 
@@ -168,12 +222,14 @@ namespace AvatarSmartBackup
 
         // ZIP / PERFORMANCE
         public ZipPolicy zipPolicy = ZipPolicy.OnChange;
-        public int zipEveryN = 3;
-        public int zipDailyHour = 19, zipDailyMinute = 0;
+        public int idleDelaySeconds = 10;             // Seconds of inactivity before zipping when Idle policy
         public bool zipFastest = true;                 // Fastest vs Optimal
         public bool autoThrottle = true;               // Automatic throttling (recommended)
         public int copyMaxMBps = 250;                  // Manual cap (MB/s). 0 = unlimited
         public int zipMaxMBps = 150;                   // Manual cap (MB/s). 0 = unlimited
+        public float lastMeasuredMBps = 0f;            // Result of last IO benchmark
+        public long lastBenchmarkTicks = 0;            // UTC ticks of last benchmark
+        public long lastBackupBytes = 0;                // Size of last backup data
         public int maxParallelThreads = Math.Max(1, Environment.ProcessorCount);
 
         public bool saveScenesBeforeBackup = false;    // Avoid blocking by default
@@ -192,8 +248,6 @@ namespace AvatarSmartBackup
         public const string LastBackupUtc = "ASB/LastBackupUtcTicks";
         public const string RunsCount = "ASB/RunsCount";
         public const string HookedVRC = "ASB/HookedVRC";
-        public const string ZipCounter = "ASB/ZipCounter";
-        public const string LastZipDay = "ASB/LastZipDay";
     }
 
     internal static class Session
@@ -203,8 +257,6 @@ namespace AvatarSmartBackup
         public static DateTime? LastBackupUtc { get => GetDT(SessionKeys.LastBackupUtc); set => SetDT(SessionKeys.LastBackupUtc, value); }
         public static int RunsCount { get => SessionState.GetInt(SessionKeys.RunsCount, 0); set => SessionState.SetInt(SessionKeys.RunsCount, value); }
         public static bool HookedVRC { get => SessionState.GetBool(SessionKeys.HookedVRC, false); set => SessionState.SetBool(SessionKeys.HookedVRC, value); }
-        public static int ZipCounter { get => SessionState.GetInt(SessionKeys.ZipCounter, 0); set => SessionState.SetInt(SessionKeys.ZipCounter, value); }
-        public static int LastZipDay { get => SessionState.GetInt(SessionKeys.LastZipDay, -1); set => SessionState.SetInt(SessionKeys.LastZipDay, value); }
 
         static DateTime? GetDT(string k)
         {
@@ -324,6 +376,54 @@ namespace AvatarSmartBackup
                 return MatchesExt(assetPath, t);
             })) return false;
             return true;
+        }
+    }
+
+    // Tracks file changes incrementally using FileSystemWatcher to avoid full scans
+    internal static class IncrementalCollector
+    {
+        static readonly HashSet<string> Changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        static FileSystemWatcher _watcher;
+
+        static IncrementalCollector()
+        {
+            try
+            {
+                string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");
+                if (Directory.Exists(root))
+                {
+                    _watcher = new FileSystemWatcher(root)
+                    {
+                        IncludeSubdirectories = true,
+                        NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite
+                    };
+                    _watcher.Changed += OnChange;
+                    _watcher.Created += OnChange;
+                    _watcher.Deleted += OnChange;
+                    _watcher.Renamed += (s, e) =>
+                    {
+                        OnChange(s, new FileSystemEventArgs(WatcherChangeTypes.Changed, Path.GetDirectoryName(e.FullPath), e.Name));
+                        OnChange(s, new FileSystemEventArgs(WatcherChangeTypes.Changed, Path.GetDirectoryName(e.OldFullPath), e.OldName));
+                    };
+                    _watcher.EnableRaisingEvents = true;
+                }
+            }
+            catch { _watcher = null; }
+        }
+
+        static void OnChange(object sender, FileSystemEventArgs e)
+        {
+            lock (Changed) Changed.Add(e.FullPath);
+        }
+
+        public static IEnumerable<string> ConsumeChanges()
+        {
+            lock (Changed)
+            {
+                var arr = Changed.ToArray();
+                Changed.Clear();
+                return arr;
+            }
         }
     }
 
@@ -559,6 +659,9 @@ namespace AvatarSmartBackup
                 s = JsonUtility.FromJson<BackupSettings>(File.ReadAllText(GlobalSettingsPath, Encoding.UTF8));
             else s = new BackupSettings();
             s.useProjectSettings = UseProjectSettings;
+            if (s.idleDelaySeconds <= 0) s.idleDelaySeconds = 10;
+            if (s.lastMeasuredMBps < 0f) s.lastMeasuredMBps = 0f;
+            if (s.lastBackupBytes < 0) s.lastBackupBytes = 0;
 
             // Sync dropdown presets with stored numeric limits (for backward compatibility)
             long[] presetVals = new long[] { 256, 512, 1024, 2048, 4096 };
@@ -608,9 +711,141 @@ namespace AvatarSmartBackup
             if (anyDirty) EditorSceneManager.SaveOpenScenes();
         }
 
+        static (List<(string src, string dst)> jobs, BackupManifest manifest, long totalBytes, int copied, int skipped) BuildCopyPlan(BackupSettings s, int progId)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var inc = IncrementalCollector.ConsumeChanges()?.ToArray() ?? Array.Empty<string>();
+            bool haveInc = inc.Length > 0;
+            if (haveInc)
+            {
+                foreach (var abs0 in inc)
+                {
+                    string abs = abs0;
+                    if (abs.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string baseP = abs.Substring(0, abs.Length - 5);
+                        if (File.Exists(baseP)) abs = baseP;
+                    }
+                    if (!File.Exists(abs)) continue;
+                    string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                    if (CollectHelpers.PassesFolderFilters(rel, s)) set.Add(abs);
+                }
+            }
+            if (!haveInc)
+            {
+                foreach (var c in Collectors)
+                    foreach (var abs in c.CollectAbsolutePaths(s))
+                        if (File.Exists(abs)) set.Add(abs);
+            }
+
+            set.RemoveWhere(p => !FileUtilEx.MakeRelToProject(p).Replace("\\", "/").StartsWith("Assets/", StringComparison.OrdinalIgnoreCase));
+            set.RemoveWhere(p => p.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) ||
+                                 p.EndsWith(".obj", StringComparison.OrdinalIgnoreCase) ||
+                                 p.EndsWith(".blend", StringComparison.OrdinalIgnoreCase));
+
+            Directory.CreateDirectory(CurrentDir);
+            Directory.CreateDirectory(ArchiveDir);
+
+            var prev = LoadManifest();
+            var man = new BackupManifest
+            {
+                projectName = FileUtilEx.ProjectName,
+                unityVersion = Application.unityVersion,
+                createdUtc = DateTime.UtcNow.ToString("o"),
+                entries = new List<ManifestEntry>()
+            };
+
+            var copyJobs = new List<(string src, string dst)>(set.Count);
+            int copied = 0, skipped = 0;
+            long totalBytes = 0;
+            int i = 0;
+
+            foreach (var abs in set)
+            {
+                i++;
+                string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
+                string guid = FileUtilEx.TryReadGuidFromMeta(abs) ?? string.Empty;
+                var fi = new FileInfo(abs);
+                totalBytes += fi.Length;
+
+                bool needsCopy = true;
+                string md5 = null;
+                ManifestEntry prevEntry = null;
+                if (prev != null)
+                {
+                    prevEntry = (!string.IsNullOrEmpty(guid))
+                        ? prev.entries.FirstOrDefault(x => x.guid == guid)
+                        : prev.entries.FirstOrDefault(x => x.relPath == rel);
+                    if (prevEntry != null && prevEntry.size == fi.Length && prevEntry.lastWriteUtcTicks == fi.LastWriteTimeUtc.Ticks)
+                    {
+                        needsCopy = false;
+                        md5 = prevEntry.md5;
+                    }
+                }
+
+                man.entries.Add(new ManifestEntry
+                {
+                    guid = guid,
+                    relPath = rel,
+                    size = fi.Length,
+                    lastWriteUtcTicks = fi.LastWriteTimeUtc.Ticks,
+                    md5 = md5
+                });
+
+                string dst = Path.Combine(CurrentDir, rel);
+                if (needsCopy)
+                {
+                    copyJobs.Add((abs, dst));
+                    copied++;
+                }
+                else
+                {
+                    bool moved = true;
+                    if (prevEntry != null && !string.Equals(prevEntry.relPath, rel, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            string oldAbs = Path.Combine(CurrentDir, prevEntry.relPath);
+                            if (File.Exists(oldAbs))
+                            {
+                                Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                                if (File.Exists(dst)) File.Delete(dst);
+                                File.Move(oldAbs, dst);
+                            }
+                            else moved = false;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Warn($"Move-in-cache failed: {prevEntry.relPath} -> {rel} – {ex.Message}. Falling back to copy.");
+                            moved = false;
+                        }
+                    }
+                    if (!moved)
+                    {
+                        copyJobs.Add((abs, dst));
+                        copied++;
+                    }
+                    else
+                    {
+                        skipped++;
+                    }
+                }
+
+                var meta = abs + ".meta";
+                if (File.Exists(meta)) copyJobs.Add((meta, Path.Combine(CurrentDir, rel + ".meta")));
+
+                if (progId >= 0 && set.Count > 0 && i % 20 == 0)
+                    ProgressUX.Report(progId, (float)i / set.Count, $"Planning {i}/{set.Count}");
+            }
+
+            return (copyJobs, man, totalBytes, copied, skipped);
+        }
+
         // Anti re-entrancy guards
         static readonly SemaphoreSlim _one = new SemaphoreSlim(1, 1);
         static int _busy;
+        static int _pendingRun;
+        static int _benchBusy;
 
         // API pubblica
         public static void RunBackupNow(BackupSettings s, bool showToast = true, string reason = null, bool showProgressUI = true, bool forceZip = false)
@@ -622,115 +857,41 @@ namespace AvatarSmartBackup
             {
                 if (Interlocked.Exchange(ref _busy, 1) == 1)
                 {
-                    Log.Warn("Backup already running – skipped.");
+                    Log.Info("Backup already running – queued another run.");
+                    Interlocked.Exchange(ref _pendingRun, 1);
                     return;
                 }
                 await _one.WaitAsync();
 
+                await EnsureBenchmarkAsync(s);
+                int copyCap = EffectiveCopyMBps(s);
+                int zipCap = EffectiveZipMBps(s);
+                if (copyCap > 0) Log.Info($"Copy throttle: {copyCap} MB/s{(s.autoThrottle ? " (auto)" : string.Empty)}");
+                if (zipCap > 0) Log.Info($"Zip throttle: {zipCap} MB/s{(s.autoThrottle ? " (auto)" : string.Empty)}");
+                double intervalSec = s.debugMode ? s.intervalMinutes : s.intervalMinutes * 60;
+                if (!s.debugMode && s.intervalMinutes < 5)
+                    Log.Warn("Backup interval under 5 minutes may affect editor performance.");
+                if (s.lastBackupBytes > 0 && copyCap > 0)
+                {
+                    double secNeeded = s.lastBackupBytes / (copyCap * 1024.0 * 1024.0);
+                    if (secNeeded > intervalSec)
+                    {
+                        string unit = s.debugMode ? "sec" : "min";
+                        Log.Warn($"Estimated throughput may not finish backup ({HumanMB(s.lastBackupBytes)}) within {s.intervalMinutes} {unit}.");
+                    }
+                }
+
                 if (s.saveScenesBeforeBackup) SaveOpenScenesIfDirty();
 
-                // 1) Scan e decisione (no UI)
-                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (var c in Collectors)
-                    foreach (var abs in c.CollectAbsolutePaths(s))
-                        if (File.Exists(abs)) set.Add(abs);
-
-                // solo Assets/
-                set.RemoveWhere(p => !FileUtilEx.MakeRelToProject(p).Replace("\\", "/").StartsWith("Assets/", StringComparison.OrdinalIgnoreCase));
-                // escludi formati pesanti/externals
-                set.RemoveWhere(p => p.EndsWith(".fbx", StringComparison.OrdinalIgnoreCase) ||
-                                     p.EndsWith(".obj", StringComparison.OrdinalIgnoreCase) ||
-                                     p.EndsWith(".blend", StringComparison.OrdinalIgnoreCase));
-
-                Directory.CreateDirectory(CurrentDir);
-                Directory.CreateDirectory(ArchiveDir);
-
-                var prev = LoadManifest();
-                var man = new BackupManifest
-                {
-                    projectName = FileUtilEx.ProjectName,
-                    unityVersion = Application.unityVersion,
-                    createdUtc = DateTime.UtcNow.ToString("o"),
-                    entries = new List<ManifestEntry>()
-                };
-
-                var copyJobs = new List<(string src, string dst)>(set.Count);
-                int copied = 0, skipped = 0;
-
-                foreach (var abs in set)
-                {
-                    string rel = FileUtilEx.MakeRelToProject(abs).Replace("\\", "/");
-                    string guid = FileUtilEx.TryReadGuidFromMeta(abs) ?? string.Empty;
-                    var fi = new FileInfo(abs);
-
-                    bool needsCopy = true;
-                    string md5 = null;
-                    ManifestEntry prevEntry = null;
-                    if (prev != null)
-                    {
-                        prevEntry = (!string.IsNullOrEmpty(guid))
-                            ? prev.entries.FirstOrDefault(x => x.guid == guid)
-                            : prev.entries.FirstOrDefault(x => x.relPath == rel);
-                        if (prevEntry != null && prevEntry.size == fi.Length && prevEntry.lastWriteUtcTicks == fi.LastWriteTimeUtc.Ticks)
-                        {
-                            needsCopy = false; // unchanged content
-                            md5 = prevEntry.md5;
-                        }
-                    }
-                    // MD5 deferred to background step
-
-                    man.entries.Add(new ManifestEntry
-                    {
-                        guid = guid,
-                        relPath = rel,
-                        size = fi.Length,
-                        lastWriteUtcTicks = fi.LastWriteTimeUtc.Ticks,
-                        md5 = md5
-                    });
-
-                    string dst = Path.Combine(CurrentDir, rel);
-                    if (needsCopy)
-                    {
-                        copyJobs.Add((abs, dst));
-                        copied++;
-                    }
-                    else
-                    {
-                        // unchanged content; if path changed (rename/move), move existing cached copy
-                        if (prevEntry != null && !string.Equals(prevEntry.relPath, rel, StringComparison.OrdinalIgnoreCase))
-                        {
-                            try
-                            {
-                                string oldAbs = Path.Combine(CurrentDir, prevEntry.relPath);
-                                if (File.Exists(oldAbs))
-                                {
-                                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
-                                    if (File.Exists(dst)) File.Delete(dst);
-                                    File.Move(oldAbs, dst);
-                                }
-                                else
-                                {
-                                    // fallback: copy from project if cached file missing
-                                    copyJobs.Add((abs, dst));
-                                    copied++;
-                                    continue;
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Warn($"Move-in-cache failed: {prevEntry.relPath} -> {rel} – {ex.Message}. Falling back to copy.");
-                                copyJobs.Add((abs, dst));
-                                copied++;
-                                continue;
-                            }
-                        }
-                        skipped++;
-                    }
-
-                    // copia .meta sempre (leggero)
-                    var meta = abs + ".meta";
-                    if (File.Exists(meta)) copyJobs.Add((meta, Path.Combine(CurrentDir, rel + ".meta")));
-                }
+                // 1) Scan e costruzione job (background)
+                int scanId = showProgressUI ? ProgressUX.Start("Avatar Smart Backup", "Scanning project", false) : -1;
+                var plan = await Task.Run(() => BuildCopyPlan(s, scanId));
+                ProgressUX.Finish(scanId);
+                var copyJobs = plan.jobs;
+                var man = plan.manifest;
+                long totalBytes = plan.totalBytes;
+                int copied = plan.copied;
+                int skipped = plan.skipped;
 
                 // 2) Copie (background, non modale, throttled)
                 if (copyJobs.Count > 0)
@@ -818,6 +979,8 @@ namespace AvatarSmartBackup
                 bool shouldZip = forceZip || ShouldCreateZip(s, hadChanges: copied > 0);
                 if (shouldZip)
                 {
+                    if (s.zipPolicy == ZipPolicy.Idle)
+                        await WaitForIdleSeconds(s.idleDelaySeconds);
                     var ctsZip = new CancellationTokenSource();
                     try { await CreateZipAsync(s, ctsZip.Token, ctsZip, showProgressUI); }
                     catch (OperationCanceledException) { Log.Warn("ZIP canceled by user."); }
@@ -835,6 +998,13 @@ namespace AvatarSmartBackup
                     MainThread.Invoke(() => { EditorWindow.focusedWindow?.ShowNotification(new GUIContent(msg)); });
                 }
                 Log.Info($"Backup completed. Copied {copied}, Skipped {skipped}, Total {man.entries.Count}.");
+
+                s.lastBackupBytes = totalBytes;
+                MainThread.Invoke(() =>
+                {
+                    SaveSettings(s);
+                    TimerService.InvalidateSettingsCache();
+                });
             }
             catch (OperationCanceledException)
             {
@@ -848,6 +1018,15 @@ namespace AvatarSmartBackup
             {
                 Interlocked.Exchange(ref _busy, 0);
                 try { _one.Release(); } catch { }
+                bool again = Interlocked.Exchange(ref _pendingRun, 0) == 1;
+                if (again)
+                {
+                    RunBackupNow(s, showToast, reason, showProgressUI, forceZip);
+                }
+                else if (Session.IsRunning)
+                {
+                    MainThread.Invoke(() => TimerService.ScheduleNextRun(s));
+                }
             }
         }
 
@@ -893,33 +1072,90 @@ namespace AvatarSmartBackup
             {
                 case ZipPolicy.OnChange:
                     return hadChanges;                        // zip solo se ci sono state changes
-                case ZipPolicy.EveryN:
-                    if (hadChanges) { Session.ZipCounter = Session.ZipCounter + 1; }
-                    if (Session.ZipCounter >= Mathf.Max(1, s.zipEveryN))
-                    { Session.ZipCounter = 0; return true; }
-                    return false;
-                case ZipPolicy.DailyHHMM:
-                    if (!hadChanges) return false;
-                    var now = DateTime.Now;
-                    bool newDay = Session.LastZipDay != now.DayOfYear;
-                    bool pastTime = now.TimeOfDay >= new TimeSpan(s.zipDailyHour, s.zipDailyMinute, 0);
-                    if (newDay && pastTime) { Session.LastZipDay = now.DayOfYear; return true; }
-                    return false;
+                case ZipPolicy.Idle:
+                    return !hadChanges;                       // zip quando non ci sono changes
                 case ZipPolicy.OnPlay:
-                case ZipPolicy.Manual:
                 default:
                     return false;
             }
         }
 
+        static async Task WaitForIdleSeconds(int seconds)
+        {
+            while (EditorIdle.TimeSinceLastActivity < seconds)
+                await Task.Delay(500);
+        }
+
+        static readonly TimeSpan BenchmarkEvery = TimeSpan.FromHours(24);
+
+        static async Task EnsureBenchmarkAsync(BackupSettings s)
+        {
+            if (!s.autoThrottle) return;
+            DateTime last = s.lastBenchmarkTicks > 0 ? new DateTime(s.lastBenchmarkTicks, DateTimeKind.Utc) : DateTime.MinValue;
+            if (s.lastMeasuredMBps <= 0f || DateTime.UtcNow - last > BenchmarkEvery)
+            {
+                if (Interlocked.Exchange(ref _benchBusy, 1) == 1) return;
+                try
+                {
+                    float mbps = await RunBenchmarkAsync();
+                    if (mbps > 0f)
+                    {
+                        s.lastMeasuredMBps = mbps;
+                        s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
+                        SaveSettings(s);
+                        TimerService.InvalidateSettingsCache();
+                        Log.Info($"Disk throughput benchmark: {mbps:0.0} MB/s");
+                    }
+                }
+                finally { _benchBusy = 0; }
+            }
+        }
+
+        static Task<float> RunBenchmarkAsync()
+        {
+            return Task.Run(() =>
+            {
+                try
+                {
+                    string dir = Path.Combine(Path.GetTempPath(), "ASB_Bench");
+                    Directory.CreateDirectory(dir);
+                    string a = Path.Combine(dir, "a.tmp");
+                    string b = Path.Combine(dir, "b.tmp");
+                    int sizeMB = 32;
+                    byte[] buf = new byte[1024 * 1024];
+                    using (var fs = new FileStream(a, FileMode.Create, FileAccess.Write, FileShare.None))
+                        for (int i = 0; i < sizeMB; i++) fs.Write(buf, 0, buf.Length);
+                    var sw = Stopwatch.StartNew();
+                    File.Copy(a, b, true);
+                    sw.Stop();
+                    double copy = sizeMB / Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                    sw.Restart();
+                    using (var fr = new FileStream(b, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        while (fr.Read(buf, 0, buf.Length) > 0) { }
+                    sw.Stop();
+                    double read = sizeMB / Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                    try { File.Delete(a); File.Delete(b); Directory.Delete(dir); } catch { }
+                    return (float)Math.Min(copy, read);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Benchmark failed: " + ex.Message);
+                    return 0f;
+                }
+            });
+        }
+
         static int EffectiveCopyMBps(BackupSettings s)
         {
-            // Heuristic: NVMe can handle high throughput; keep reasonable cap when auto
-            return s.autoThrottle ? 250 : s.copyMaxMBps;
+            if (s.autoThrottle && s.lastMeasuredMBps > 0f)
+                return Math.Max(1, (int)(s.lastMeasuredMBps * 0.7f));
+            return s.copyMaxMBps;
         }
         static int EffectiveZipMBps(BackupSettings s)
         {
-            return s.autoThrottle ? 150 : s.zipMaxMBps;
+            if (s.autoThrottle && s.lastMeasuredMBps > 0f)
+                return Math.Max(1, (int)(s.lastMeasuredMBps * 0.5f));
+            return s.zipMaxMBps;
         }
 
         static string HumanMB(long bytes)
@@ -1049,6 +1285,7 @@ namespace AvatarSmartBackup
             {
                 EditorApplication.update += Update;
                 var settings = BackupManager.LoadSettings();
+                _ = BackupManager.EnsureBenchmarkAsync(settings);
                 if (settings.autoRunOnLoad) StartTimerIfNeeded(settings);
                 TryHookVRChat();
             }
@@ -1064,21 +1301,28 @@ namespace AvatarSmartBackup
             }
             public static void InvalidateSettingsCache() { _cached = null; _nextReload = 0; }
 
+            static TimeSpan GetInterval(BackupSettings s)
+            {
+                double v = Math.Max(1, s.intervalMinutes);
+                return s.debugMode ? TimeSpan.FromSeconds(v) : TimeSpan.FromMinutes(v);
+            }
+
             public static void StartTimerIfNeeded(BackupSettings s)
             {
                 if (!Session.IsRunning)
                 {
                     Session.IsRunning = true;
-                    ScheduleNext(DateTime.UtcNow.AddMinutes(Math.Max(1, s.intervalMinutes)));
+                    ScheduleNext(DateTime.UtcNow + GetInterval(s));
                     Log.Info("Timer started.");
                 }
                 else if (Session.NextRunUtc == null)
                 {
-                    ScheduleNext(DateTime.UtcNow.AddMinutes(Math.Max(1, s.intervalMinutes)));
+                    ScheduleNext(DateTime.UtcNow + GetInterval(s));
                 }
             }
             public static void PauseTimer() { Session.IsRunning = false; Log.Info("Timer paused."); }
             static void ScheduleNext(DateTime utc) => Session.NextRunUtc = utc;
+            public static void ScheduleNextRun(BackupSettings s) => ScheduleNext(DateTime.UtcNow + GetInterval(s));
 
             static void Update()
             {
@@ -1094,8 +1338,15 @@ namespace AvatarSmartBackup
                 var due = Session.NextRunUtc ?? now;
                 if (now >= due)
                 {
-                    BackupManager.RunBackupNow(s, showToast: false, reason: "timer", showProgressUI: false);
-                    ScheduleNext(now.AddMinutes(Math.Max(1, s.intervalMinutes)));
+                    if (_busy == 1)
+                    {
+                        Interlocked.Exchange(ref _pendingRun, 1);
+                        ScheduleNext(now + TimeSpan.FromSeconds(1));
+                    }
+                    else
+                    {
+                        BackupManager.RunBackupNow(s, showToast: false, reason: "timer", showProgressUI: false);
+                    }
                 }
             }
 
@@ -1191,9 +1442,29 @@ namespace AvatarSmartBackup
                     if (running) TimerService.PauseTimer(); else TimerService.StartTimerIfNeeded(_settings);
                 }
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Interval (min)", GUILayout.Width(110));
-                _settings.intervalMinutes = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, 240);
+                string lbl = _settings.debugMode ? "Interval (s)" : "Interval (min)";
+                EditorGUILayout.LabelField(lbl, GUILayout.Width(110));
+                int maxInt = _settings.debugMode ? 119 : 240;
+                _settings.intervalMinutes = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, maxInt);
                 EditorGUILayout.EndHorizontal();
+                bool warnInterval = !_settings.debugMode && _settings.intervalMinutes < 5;
+                int effCopy = BackupManager.EffectiveCopyMBps(_settings);
+                bool warnSpeed = false;
+                double secNeeded = 0;
+                double intervalSec = _settings.debugMode ? _settings.intervalMinutes : _settings.intervalMinutes * 60;
+                if (_settings.lastBackupBytes > 0 && effCopy > 0)
+                {
+                    secNeeded = _settings.lastBackupBytes / (effCopy * 1024.0 * 1024.0);
+                    warnSpeed = secNeeded > intervalSec;
+                }
+                if (warnInterval)
+                    EditorGUILayout.HelpBox("Intervals under 5 minutes may impact editor performance.", MessageType.Warning);
+                if (warnSpeed)
+                {
+                    double minutesNeeded = secNeeded / 60.0;
+                    double mb = _settings.lastBackupBytes / (1024.0 * 1024.0);
+                    EditorGUILayout.HelpBox($"At {effCopy} MB/s, backing up {mb:0.0} MB takes ~{minutesNeeded:0.0} min, exceeding the interval.", MessageType.Warning);
+                }
                 EditorGUILayout.EndVertical();
 
                 EditorGUILayout.LabelField($"Next: {Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--"}    Last: {Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "never"}");
@@ -1220,6 +1491,7 @@ namespace AvatarSmartBackup
                         BackupManager.TimerService.InvalidateSettingsCache();
                         _settings = BackupManager.LoadSettings();
                     }
+                    _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Debug mode", "Enable second-based intervals and extra debug options."), _settings.debugMode);
                     EditorGUILayout.EndVertical();
 
                     // ZIP POLICY
@@ -1228,16 +1500,13 @@ namespace AvatarSmartBackup
                     EditorGUILayout.LabelField("Zip Policy", EditorStyles.boldLabel);
                     if (GUILayout.Button(new GUIContent("?", "What do these options mean?"), GUILayout.Width(22)))
                     {
-                        EditorUtility.DisplayDialog("Zip Policy", "On Change: create a snapshot only when files changed.\nEvery N: after N backups with changes.\nDaily at HH:MM: one snapshot per day once the time is reached (after a change).\nOn Play: take a snapshot when entering Play Mode.\nManual: only when you press Backup Now.", "OK");
+                        EditorUtility.DisplayDialog("Zip Policy", "On Change: create a snapshot only when files changed.\nIdle: create a snapshot when no changes were detected.\nOn Play: take a snapshot when entering Play Mode.", "OK");
                     }
                     EditorGUILayout.EndHorizontal();
                     _settings.zipPolicy = (ZipPolicy)EditorGUILayout.EnumPopup(new GUIContent("Mode", "When to create zip snapshots."), _settings.zipPolicy);
-                    if (_settings.zipPolicy == ZipPolicy.EveryN)
-                        _settings.zipEveryN = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Every N backups", "Create a zip after this many backups with changes."), _settings.zipEveryN), 1, 50);
-                    if (_settings.zipPolicy == ZipPolicy.DailyHHMM)
+                    using (new EditorGUI.DisabledScope(_settings.zipPolicy != ZipPolicy.Idle))
                     {
-                        _settings.zipDailyHour = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Hour (0-23)", "Daily zip time (hour)."), _settings.zipDailyHour), 0, 23);
-                        _settings.zipDailyMinute = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Minutes", "Daily zip time (minutes)."), _settings.zipDailyMinute), 0, 59);
+                        _settings.idleDelaySeconds = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Idle delay (s)", "Seconds of inactivity before creating a zip when policy is Idle."), _settings.idleDelaySeconds), 1, 3600);
                     }
                     _settings.keepSnapshots = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Keep last snapshots", "How many .zip snapshots to keep in the Archive folder (1 disables snapshots)."), _settings.keepSnapshots), 1, 50);
                     _settings.zipFastest = EditorGUILayout.ToggleLeft(new GUIContent("Compression level: Fastest (quicker)", "Fastest is quicker but larger archives. Untick for Optimal (smaller, slower)."), _settings.zipFastest);
@@ -1249,6 +1518,16 @@ namespace AvatarSmartBackup
                     _settings.autoThrottle = EditorGUILayout.ToggleLeft(new GUIContent("Auto throttle (recommended)", "Automatically caps IO speed to keep the editor responsive."), _settings.autoThrottle);
                     _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Max parallel threads", "Number of concurrent copy/hash tasks."), _settings.maxParallelThreads), 1, Math.Max(1, System.Environment.ProcessorCount));
                     _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
+                    if (_settings.lastMeasuredMBps > 0f)
+                        EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
+                    if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150)))
+                    {
+                        _settings.lastMeasuredMBps = 0f;
+                        _settings.lastBenchmarkTicks = 0;
+                        BackupManager.SaveSettings(_settings);
+                        BackupManager.TimerService.InvalidateSettingsCache();
+                        _ = BackupManager.EnsureBenchmarkAsync(_settings);
+                    }
                     EditorGUILayout.EndVertical();
 
                     // WHAT TO INCLUDE
