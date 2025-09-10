@@ -81,7 +81,7 @@ namespace AvatarSmartBackup
             // Pulsanti verticali
             if (GUILayout.Button(new GUIContent("Backup Now", "Start a backup immediately (non-blocking)."))) BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Create Snapshot Now", "Create a .zip snapshot from the current backup content."))) BackupManager.CreateSnapshotNow(_settings);
+            if (GUILayout.Button(new GUIContent("Create Snapshot Now", "Create a .zip snapshot from the current backup content."))) SnapshotCreator.CreateSnapshotNow(_settings);
             if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the folder where backups are stored."))) EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
             EditorGUILayout.EndHorizontal();
     
