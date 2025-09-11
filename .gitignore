@@ -1,1 +1,4 @@
 *.meta
+Plugins/SQLite/System.Data.SQLite.dll
+.vscode/
+**/.vscode/
