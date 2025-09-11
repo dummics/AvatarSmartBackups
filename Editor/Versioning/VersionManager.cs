@@ -234,7 +234,7 @@ namespace AvatarSmartBackup.Versioning
         /// <summary>
         /// Preview files from a commit in temporary directory
         /// </summary>
-        public async Task<string> PreviewCommitAsync(long commitId, List<string> filePaths = null)
+        public Task<string> PreviewCommitAsync(long commitId, List<string> filePaths = null)
         {
             try
             {
@@ -253,7 +253,7 @@ namespace AvatarSmartBackup.Versioning
                 }
                 
                 Log.Info($"Preview created in {tempDir}");
-                return tempDir;
+                return Task.FromResult(tempDir);
             }
             catch (Exception ex)
             {

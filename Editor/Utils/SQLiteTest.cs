@@ -94,7 +94,7 @@ namespace AvatarSmartBackup
         }
         
         [MenuItem("Tools/Avatar Smart Backup/System Tests/Test Full Version System", false, 202)]
-        public static async void TestFullVersionSystem()
+        public static void TestFullVersionSystem()
         {
             try
             {

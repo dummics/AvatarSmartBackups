@@ -283,23 +283,23 @@ namespace AvatarSmartBackup.Versioning
                    Math.Abs(fileSize - previousVersion.Size) < fileSize / 2; // Less than 50% change
         }
         
-        private async Task<VersionedFile> FindExistingFileByHashAsync(string hash, long beforeCommitId)
+        private Task<VersionedFile> FindExistingFileByHashAsync(string hash, long beforeCommitId)
         {
             // Implementation would query database for existing file with same hash
             // This enables deduplication across commits
-            return null; // Simplified for now
+            return Task.FromResult<VersionedFile>(null); // Simplified for now
         }
         
-        private async Task<VersionedFile> FindFileInCommitAsync(string filePath, long commitId)
+        private Task<VersionedFile> FindFileInCommitAsync(string filePath, long commitId)
         {
             var files = _database.GetCommitFiles(commitId);
-            return files.FirstOrDefault(f => f.Path == filePath);
+            return Task.FromResult(files.FirstOrDefault(f => f.Path == filePath));
         }
         
-        private async Task<long> GetCommitIdForFileAsync(VersionedFile file)
+        private Task<long> GetCommitIdForFileAsync(VersionedFile file)
         {
             // Would query database to find which commit contains this file
-            return 1; // Simplified
+            return Task.FromResult(1L); // Simplified
         }
         
         /// <summary>
@@ -321,7 +321,7 @@ namespace AvatarSmartBackup.Versioning
             }
         }
         
-        private async Task DeleteCommitDataAsync(long commitId)
+        private Task DeleteCommitDataAsync(long commitId)
         {
             // Delete physical files and database entries
             string commitDir = Path.Combine(_storageRoot, "versions", $"v{commitId:D6}");
@@ -329,8 +329,7 @@ namespace AvatarSmartBackup.Versioning
             {
                 Directory.Delete(commitDir, true);
             }
-            
-            // Database cleanup would happen here
+            return Task.CompletedTask;
         }
         
         private class DeltaResult
