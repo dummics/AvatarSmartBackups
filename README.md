@@ -1,70 +1,70 @@
 # Avatar Smart Backups - Version System
 
-Un sistema di backup intelligente per progetti Unity con versioning automatico stile Git integrato nell'Editor.
+An intelligent backup system for Unity projects with automatic, Git-like versioning integrated into the Editor.
 
-## 🚀 Caratteristiche
+## 🚀 Features
 
-- **Backup Automatici**: Creazione automatica di snapshots durante il lavoro
-- **Version Timeline**: Interfaccia visuale per navigare tra le versioni salvate 
-- **Restore Intelligente**: Preview e ripristino selettivo di file specifici
-- **Storage Efficiente**: Compressione delta per ridurre lo spazio utilizzato
-- **Database SQLite**: Metadata organizzati in database locale per ricerche veloci
+- Automatic Backups: Create snapshots automatically while you work
+- Version Timeline: Visual interface to browse saved versions
+- Smart Restore: Preview and selectively restore specific files
+- Efficient Storage: Delta compression to reduce disk usage
+- SQLite Database: Local metadata database for fast queries
 
-## 📋 Requisiti
+## 📋 Requirements
 
-- Unity 2022.3 o superiore
-- Sistema Windows (Editor only)
-- System.Data.SQLite.dll (inclusa)
+- Unity 2022.3 or newer
+- Windows Editor (Editor-only features)
+- System.Data.SQLite.dll (included)
 
-## ⚡ Utilizzo Rapido
+## ⚡ Quick Start
 
-### Configurazione Base
-1. Apri **Tools → Avatar Smart Backup**
-2. Nelle Settings, attiva `Enable Version System`
-3. Configura la frequenza di backup automatico
+### Basic setup
+1. Open Tools → Avatar Smart Backup
+2. In Settings, enable `Enable Version System`
+3. Configure automatic backup frequency
 
-### Test del Sistema
+### Run quick tests
 ```
 Tools → Avatar Smart Backup → Quick Tests
-├── ⚡ Quick SQLite Test - Verifica database
-└── 🚀 Test Version System Ready - Test completo
+├── ⚡ Quick SQLite Test - verifies the database
+└── 🚀 Test Version System Ready - full readiness check
 ```
 
-### Interfacce Principali
-- **🕒 Version Timeline**: Naviga tra le versioni salvate
-- **📊 Version Stats**: Statistiche storage e performance
-- **💾 Manual Commit**: Crea snapshot manuale con commento
+### Main interfaces
+- 🕒 Version Timeline: Browse saved versions
+- 📊 Version Stats: Storage and performance statistics
+- 💾 Manual Commit: Create a manual snapshot with a comment
 
-## 🛠️ Architettura
+## 🛠️ Architecture
 
-- **VersionManager**: Orchestrazione commit/restore
-- **VersionDatabase**: Layer di accesso SQLite 
-- **DeltaStorageManager**: Compressione e storage efficiente
-- **VersionTimelineWindow**: UI timeline per navigazione
+- VersionManager: Orchestrates commits and restores
+- VersionDatabase: SQLite access layer
+- DeltaStorageManager: Compression and efficient storage
+- VersionTimelineWindow: Timeline UI for navigation
 
-## 📂 Struttura File
+## 📂 File structure
 
 ```
 Assets/AvatarSmartBackups/
 ├── Editor/
-│   ├── Backup/           # Sistema backup esistente
-│   ├── Versioning/       # Sistema versioning nuovo
-│   ├── Windows/          # Interfacce UI
-│   └── Utils/            # Test e utility
-└── Plugins/SQLite/       # Database nativo
+│   ├── Backup/           # Existing backup system
+│   ├── Versioning/       # New versioning system
+│   ├── Windows/          # UI windows
++│   └── Utils/            # Tests and utilities
+└── Plugins/SQLite/       # Native database library
 ```
 
 ## 🧪 Testing
 
-Il sistema include test per verificare funzionalità:
-- Connessione SQLite
-- Creazione database e tabelle
-- Commit automatici e manuali
+Included tests verify:
+- SQLite connection
+- Database and table creation
+- Automatic and manual commits
 - Timeline navigation
 
-## 📝 Note
+## 📝 Notes
 
-- Il sistema è **Editor-only** e non influisce sui build
-- I backup vengono salvati in una cartella separata dal progetto
-- SQLite database locale per performance ottimali
-- Delta compression per minimizzare spazio disco
+- The system is Editor-only and does not affect builds
+- Backups are saved in a separate folder from the project contents
+- Local SQLite database for optimal performance
+- Delta compression is used to minimize disk usage
