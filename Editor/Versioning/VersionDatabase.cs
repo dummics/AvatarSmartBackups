@@ -2,9 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Data.SQLite;
 using System.IO;
 using UnityEngine;
-using Mono.Data.Sqlite;
 
 namespace AvatarSmartBackup.Versioning
 {
@@ -15,7 +15,7 @@ namespace AvatarSmartBackup.Versioning
     internal class VersionDatabase : IDisposable
     {
         private readonly string _dbPath;
-        private SqliteConnection _connection;
+        private SQLiteConnection _connection;
         
         public string DatabasePath => _dbPath;
         
@@ -28,7 +28,7 @@ namespace AvatarSmartBackup.Versioning
         private void Initialize()
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_dbPath));
-            _connection = new SqliteConnection($"URI=file:{_dbPath}");
+            _connection = new SQLiteConnection($"Data Source={_dbPath};Version=3;");
             _connection.Open();
             CreateTables();
         }
@@ -88,7 +88,7 @@ namespace AvatarSmartBackup.Versioning
             
             foreach (var cmd in commands)
             {
-                using var command = new SqliteCommand(cmd, _connection);
+                using var command = new SQLiteCommand(cmd, _connection);
                 command.ExecuteNonQuery();
             }
             
@@ -101,7 +101,7 @@ namespace AvatarSmartBackup.Versioning
         
         private void SetSettingIfNotExists(string key, string defaultValue)
         {
-            using var cmd = new SqliteCommand("INSERT OR IGNORE INTO settings (key, value) VALUES (@key, @value)", _connection);
+            using var cmd = new SQLiteCommand("INSERT OR IGNORE INTO settings (key, value) VALUES (@key, @value)", _connection);
             cmd.Parameters.AddWithValue("@key", key);
             cmd.Parameters.AddWithValue("@value", defaultValue);
             cmd.ExecuteNonQuery();
@@ -109,7 +109,7 @@ namespace AvatarSmartBackup.Versioning
         
         public string GetSetting(string key, string defaultValue = null)
         {
-            using var cmd = new SqliteCommand("SELECT value FROM settings WHERE key = @key", _connection);
+            using var cmd = new SQLiteCommand("SELECT value FROM settings WHERE key = @key", _connection);
             cmd.Parameters.AddWithValue("@key", key);
             var result = cmd.ExecuteScalar();
             return result?.ToString() ?? defaultValue;
@@ -117,7 +117,7 @@ namespace AvatarSmartBackup.Versioning
         
         public void SetSetting(string key, string value)
         {
-            using var cmd = new SqliteCommand("INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)", _connection);
+            using var cmd = new SQLiteCommand("INSERT OR REPLACE INTO settings (key, value) VALUES (@key, @value)", _connection);
             cmd.Parameters.AddWithValue("@key", key);
             cmd.Parameters.AddWithValue("@value", value);
             cmd.ExecuteNonQuery();
@@ -135,7 +135,7 @@ namespace AvatarSmartBackup.Versioning
                 string hash = GenerateCommitHash(DateTime.UtcNow, files.Count);
                 long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
                 
-                using var commitCmd = new SqliteCommand(@"
+                using var commitCmd = new SQLiteCommand(@"
                     INSERT INTO commits (hash, timestamp, message, file_count, total_size, parent_id) 
                     VALUES (@hash, @timestamp, @message, @fileCount, @totalSize, @parentId)", _connection);
                     
@@ -152,7 +152,7 @@ namespace AvatarSmartBackup.Versioning
                 // Add files to commit
                 foreach (var file in files)
                 {
-                    using var fileCmd = new SqliteCommand(@"
+                    using var fileCmd = new SQLiteCommand(@"
                         INSERT INTO files (commit_id, path, hash, size, action, delta_path) 
                         VALUES (@commitId, @path, @hash, @size, @action, @deltaPath)", _connection);
                         
@@ -182,7 +182,7 @@ namespace AvatarSmartBackup.Versioning
         {
             var commits = new List<CommitInfo>();
             
-            using var cmd = new SqliteCommand(@"
+            using var cmd = new SQLiteCommand(@"
                 SELECT id, hash, timestamp, message, file_count, total_size, parent_id 
                 FROM commits 
                 ORDER BY timestamp DESC 
@@ -214,7 +214,7 @@ namespace AvatarSmartBackup.Versioning
         {
             var files = new List<VersionedFile>();
             
-            using var cmd = new SqliteCommand(@"
+            using var cmd = new SQLiteCommand(@"
                 SELECT path, hash, size, action, delta_path 
                 FROM files 
                 WHERE commit_id = @commitId 
@@ -247,7 +247,7 @@ namespace AvatarSmartBackup.Versioning
         
         public int GetTotalTrackedFiles()
         {
-            using var command = new SqliteCommand("SELECT COUNT(DISTINCT path) FROM files", _connection);
+            using var command = new SQLiteCommand("SELECT COUNT(DISTINCT path) FROM files", _connection);
             var result = command.ExecuteScalar();
             return result != null ? Convert.ToInt32(result) : 0;
         }
