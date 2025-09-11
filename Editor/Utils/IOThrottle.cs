@@ -9,6 +9,7 @@ namespace AvatarSmartBackup
     internal static class IOThrottle
     {
         // Copia stream -> stream con throttle (MB/s). 0 = illimitato.
+        // Migliorato per reliability: throttling più preciso e meno aggressivo
         public static void CopyStreamThrottled(Stream src, Stream dst, int bufferBytes, int maxMBps, CancellationToken ct)
         {
             byte[] buffer = new byte[bufferBytes];
@@ -27,17 +28,28 @@ namespace AvatarSmartBackup
                 if (maxMBps > 0)
                 {
                     double elapsed = sw.Elapsed.TotalSeconds;
-                    if (elapsed > 0)
+                    if (elapsed > 0.1) // Only throttle after meaningful time elapsed
                     {
                         double bps = total / elapsed;
                         if (bps > maxBps)
                         {
-                            // tempo desiderato per scrivere 'total' a maxBps
+                            // Conservative throttling: use smaller sleep increments for smoother operation
                             double desired = total / maxBps;
-                            int sleepMs = (int)Math.Max(1, (desired - elapsed) * 1000.0);
-                            Thread.Sleep(sleepMs);
+                            int sleepMs = (int)Math.Max(1, Math.Min(100, (desired - elapsed) * 1000.0)); // Cap sleep at 100ms
+                            
+                            if (sleepMs > 0)
+                            {
+                                System.Threading.Thread.Sleep(sleepMs);
+                                System.Threading.Thread.Yield(); // Allow other threads to run
+                            }
                         }
                     }
+                }
+                
+                // Periodic yield for UI responsiveness during large file operations
+                if (total % (2 * 1024 * 1024) == 0) // Every 2MB
+                {
+                    System.Threading.Thread.Yield();
                 }
             }
         }

@@ -11,6 +11,12 @@ namespace AvatarSmartBackup
         public const string LastBackupUtc = "ASB/LastBackupUtcTicks";
         public const string RunsCount = "ASB/RunsCount";
         public const string HookedVRC = "ASB/HookedVRC";
+        
+        // New reliability keys
+        public const string InBackup = "ASB/InBackup";
+        public const string InBenchmark = "ASB/InBenchmark";
+        public const string LastBenchmark = "ASB/LastBenchmark";
+        public const string LastManualSnapshot = "ASB/LastManualSnapshot";
     }
 
     internal static class Session
@@ -20,6 +26,128 @@ namespace AvatarSmartBackup
         public static DateTime? LastBackupUtc { get => GetDT(SessionKeys.LastBackupUtc); set => SetDT(SessionKeys.LastBackupUtc, value); }
         public static int RunsCount { get => SessionState.GetInt(SessionKeys.RunsCount, 0); set => SessionState.SetInt(SessionKeys.RunsCount, value); }
         public static bool HookedVRC { get => SessionState.GetBool(SessionKeys.HookedVRC, false); set => SessionState.SetBool(SessionKeys.HookedVRC, value); }
+
+        // Reliability improvements: Thread-safe session management
+        private static object lockObject = new object();
+        
+        public static bool InBackup 
+        { 
+            get => SessionState.GetBool(SessionKeys.InBackup, false);
+            set 
+            {
+                lock (lockObject)
+                {
+                    SessionState.SetBool(SessionKeys.InBackup, value);
+                    if (value)
+                        Log.Debug($"Session: Backup started at {DateTime.Now:HH:mm:ss}");
+                    else
+                        Log.Debug($"Session: Backup completed at {DateTime.Now:HH:mm:ss}");
+                }
+            }
+        }
+
+        public static bool InBenchmark 
+        { 
+            get => SessionState.GetBool(SessionKeys.InBenchmark, false);
+            set 
+            {
+                lock (lockObject)
+                {
+                    SessionState.SetBool(SessionKeys.InBenchmark, value);
+                    if (value)
+                        Log.Debug($"Session: Benchmark started at {DateTime.Now:HH:mm:ss}");
+                    else
+                        Log.Debug($"Session: Benchmark completed at {DateTime.Now:HH:mm:ss}");
+                }
+            }
+        }
+
+        public static DateTime LastBenchmark
+        {
+            get
+            {
+                var dt = GetDT(SessionKeys.LastBenchmark);
+                return dt?.ToLocalTime() ?? DateTime.MinValue;
+            }
+            set
+            {
+                lock (lockObject)
+                {
+                    SetDT(SessionKeys.LastBenchmark, value.ToUniversalTime());
+                }
+            }
+        }
+
+        public static DateTime LastManualSnapshot
+        {
+            get
+            {
+                var dt = GetDT(SessionKeys.LastManualSnapshot);
+                return dt?.ToLocalTime() ?? DateTime.MinValue;
+            }
+            set
+            {
+                lock (lockObject)
+                {
+                    SetDT(SessionKeys.LastManualSnapshot, value.ToUniversalTime());
+                }
+            }
+        }
+
+        // Cleanup session state when Unity starts - prevents phantom locks
+        [InitializeOnLoadMethod]
+        private static void ResetSessionOnLoad()
+        {
+            Log.Debug("Session: Resetting session state on Unity load");
+            InBackup = false;
+            InBenchmark = false;
+        }
+
+        // Safe atomic check-and-set operations for reliability
+        public static bool TryStartBackup()
+        {
+            lock (lockObject)
+            {
+                if (InBackup)
+                {
+                    Log.Debug("Session: Backup already in progress");
+                    return false;
+                }
+                InBackup = true;
+                return true;
+            }
+        }
+
+        public static bool TryStartBenchmark()
+        {
+            lock (lockObject)
+            {
+                if (InBenchmark || InBackup)
+                {
+                    Log.Debug("Session: Benchmark blocked by ongoing operation");
+                    return false;
+                }
+                InBenchmark = true;
+                return true;
+            }
+        }
+
+        public static void EndBackup()
+        {
+            lock (lockObject)
+            {
+                InBackup = false;
+            }
+        }
+
+        public static void EndBenchmark()
+        {
+            lock (lockObject)
+            {
+                InBenchmark = false;
+                LastBenchmark = DateTime.Now;
+            }
+        }
 
         static DateTime? GetDT(string k)
         {

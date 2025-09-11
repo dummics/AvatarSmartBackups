@@ -9,7 +9,7 @@ namespace AvatarSmartBackup
     [InitializeOnLoad]
     public static class TimerService
     {
-        static readonly double UpdateEverySec = 0.5;
+        static readonly double UpdateEverySec = 2.0; // Reduced frequency for less overhead (was 0.5s)
         static double _nextTick;
         static BackupSettings _cached;
         static double _nextReload;
@@ -93,8 +93,8 @@ namespace AvatarSmartBackup
                 var sNow = GetSettingsCached();
                 if (state == PlayModeStateChange.ExitingEditMode && sNow.backupOnPlayEnter)
                 {
-                    bool forceZip = (sNow.zipPolicy == ZipPolicy.OnPlay);
-                    BackupManager.RunBackupNow(sNow, showToast: false, reason: "play-enter", showProgressUI: false, forceZip: forceZip);
+                    // OnPlay policy was removed - backup on play mode without forcing zip
+                    BackupManager.RunBackupNow(sNow, showToast: false, reason: "play-enter", showProgressUI: false, forceZip: false);
                 }
             };
         }

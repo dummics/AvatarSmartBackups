@@ -77,7 +77,11 @@ namespace AvatarSmartBackup
                 Directory.CreateDirectory(Path.GetDirectoryName(p));
                 File.WriteAllText(p, JsonUtility.ToJson(s, true), Encoding.UTF8);
             }
-            catch (Exception ex) { Log.Warn("Cannot save settings: " + ex.Message); }
+            catch (Exception ex) 
+            { 
+                Log.Error($"Failed to save settings to {(s.useProjectSettings ? "project" : "global")} location: {ex.Message}", 
+                         "Settings could not be saved", ex); 
+            }
         }
 
         static BackupManifest LoadManifest()
@@ -256,6 +260,17 @@ namespace AvatarSmartBackup
         static int _pendingRun;
         static int _benchBusy;
         static long _lastManualBenchmarkTicks = 0; // Anti-spam for manual benchmark
+    static long _lastManualSnapshotTicks = 0; // Anti-spam for manual snapshot
+
+        // Attempt to claim a manual snapshot slot. Returns true if allowed (and marks the cooldown), false if cooldown active.
+        internal static bool TryClaimManualSnapshot(TimeSpan cooldown)
+        {
+            long now = DateTime.UtcNow.Ticks;
+            long last = Interlocked.Read(ref _lastManualSnapshotTicks);
+            if (now - last < cooldown.Ticks) return false;
+            Interlocked.Exchange(ref _lastManualSnapshotTicks, now);
+            return true;
+        }
         internal static bool IsBusy => _busy == 1;
         internal static void QueuePendingRun() => Interlocked.Exchange(ref _pendingRun, 1);
 
@@ -279,7 +294,7 @@ namespace AvatarSmartBackup
                 if (reason != "timer" && !forceZip)
                 {
                     var lastBackup = Session.LastBackupUtc;
-                    if (lastBackup.HasValue && (DateTime.UtcNow - lastBackup.Value).TotalSeconds < 3)
+                    if (lastBackup.HasValue && (DateTime.UtcNow - lastBackup.Value).TotalSeconds < s.minManualBackupIntervalSeconds)
                     {
                         Log.Warn($"Backup anti-spam: ignoring {reason} request (last backup {(DateTime.UtcNow - lastBackup.Value).TotalSeconds:0.1}s ago)");
                         Interlocked.Exchange(ref _busy, 0);
@@ -356,7 +371,9 @@ namespace AvatarSmartBackup
                                 {
                                     throttler.Release();
                                     int d = Interlocked.Increment(ref done);
-                                    if (total > 0) ProgressUX.Report(progId, (float)d / total, $"Copying files {d}/{total}");
+                                    // Throttle progress updates to max 10/sec for better UI performance
+                                    if (total > 0 && (d % Math.Max(1, total / 50) == 0 || d == total))
+                                        ProgressUX.Report(progId, (float)d / total, $"Copying files {d}/{total}");
                                 }
                             }, cts.Token));
                         }
@@ -421,11 +438,14 @@ namespace AvatarSmartBackup
                 if (showToast)
                 {
                     string msg = (copied > 0)
-                        ? $"Backup OK ({reason ?? "timer"})  • copied {copied}, skippati {skipped}"
-                        : $"No changes ({reason ?? "timer"})  • 0 files copied";
+                        ? $"Backup completed ({reason ?? "timer"}) • {copied} files copied"
+                        : $"Backup completed ({reason ?? "timer"}) • no changes";
                     MainThread.Invoke(() => { EditorWindow.focusedWindow?.ShowNotification(new GUIContent(msg)); });
                 }
-                Log.Info($"Backup completed. Copied {copied}, Skipped {skipped}, Total {man.entries.Count}.");
+                
+                // Detailed logging vs simple console message
+                string detailedMsg = $"Backup completed. Copied {copied}, Skipped {skipped}, Total {man.entries.Count} files.";
+                Log.Info(detailedMsg, "Backup completed successfully");
 
                 s.lastBackupBytes = totalBytes;
                 MainThread.Invoke(() =>
@@ -436,11 +456,13 @@ namespace AvatarSmartBackup
             }
             catch (OperationCanceledException)
             {
-                Log.Warn("Operation canceled by user.");
+                Log.Warn("Backup operation was canceled by user", "Backup canceled");
             }
             catch (Exception ex)
             {
-                Log.Err("Backup error: " + ex);
+                // Use new centralized exception handling
+                string detailedMsg = $"Backup operation failed: {ex.Message}";
+                Log.Error(detailedMsg, "Backup failed (see log file for details)", ex);
             }
             finally
             {
@@ -518,14 +540,33 @@ namespace AvatarSmartBackup
         public static int EffectiveCopyMBps(BackupSettings s)
         {
             if (s.autoThrottle && s.lastMeasuredMBps > 0f)
-                return Math.Max(1, (int)(s.lastMeasuredMBps * 0.7f));
+            {
+                // Conservative throttling for reliability - use 30% of measured speed with reasonable minimum
+                // This ensures editor stays responsive even during continuous operations
+                int throttled = Math.Max(10, (int)(s.lastMeasuredMBps * 0.3f));
+                
+                // Cap extremely high values that are likely unrealistic for sustained operations
+                if (s.lastMeasuredMBps > 1000f)
+                    throttled = Math.Min(throttled, 200); // Conservative cap for high-speed drives
+                    
+                return throttled;
+            }
             return s.copyMaxMBps;
         }
 
         public static int EffectiveZipMBps(BackupSettings s)
         {
             if (s.autoThrottle && s.lastMeasuredMBps > 0f)
-                return Math.Max(1, (int)(s.lastMeasuredMBps * 0.7f));
+            {
+                // Even more conservative for compression (CPU + IO intensive)
+                int throttled = Math.Max(5, (int)(s.lastMeasuredMBps * 0.2f));
+                
+                // Cap for sustained compression operations
+                if (s.lastMeasuredMBps > 1000f)
+                    throttled = Math.Min(throttled, 100);
+                    
+                return throttled;
+            }
             return s.zipMaxMBps;
         }
 
@@ -567,21 +608,22 @@ namespace AvatarSmartBackup
 
         public static async Task RunManualBenchmarkAsync(BackupSettings s)
         {
-            // Anti-spam: limit manual benchmark to once every 5 seconds
+            // Anti-spam: limit manual benchmark according to settings  
             long now = DateTime.UtcNow.Ticks;
             long lastTicks = Interlocked.Read(ref _lastManualBenchmarkTicks);
-            if (now - lastTicks < TimeSpan.FromSeconds(5).Ticks)
+            if (now - lastTicks < TimeSpan.FromSeconds(s.manualBenchmarkCooldownSeconds).Ticks)
             {
-                Log.Warn("Manual benchmark cooldown active (5s). Please wait.");
+                Log.Warn($"Manual benchmark cooldown active ({s.manualBenchmarkCooldownSeconds}s). Please wait.");
                 return;
             }
             Interlocked.Exchange(ref _lastManualBenchmarkTicks, now);
 
-            if (Interlocked.Exchange(ref _benchBusy, 1) == 1)
+            if (!Session.TryStartBenchmark())
             {
                 Log.Warn("Benchmark already running.");
                 return;
             }
+            
             try
             {
                 Log.Info("Running manual benchmark...");
@@ -599,12 +641,15 @@ namespace AvatarSmartBackup
                     Log.Warn("Manual benchmark failed to produce valid result.");
                 }
             }
-            finally { _benchBusy = 0; }
+            finally 
+            { 
+                Session.EndBenchmark();
+            }
         }
 
         static Task<float> RunBenchmarkAsync()
         {
-            // Limit benchmark runtime to avoid spamming the disk; prefer short test (~2s max).
+            // Longer, more realistic benchmark for sustained operations (5-8s instead of 2s)
             return Task.Run(() =>
             {
                 try
@@ -612,22 +657,25 @@ namespace AvatarSmartBackup
                     string dir = Path.Combine(Path.GetTempPath(), "ASB_Bench");
                     Directory.CreateDirectory(dir);
                     string a = Path.Combine(dir, "a.tmp");
-                    int sizeMB = 32; // max target size, but we may stop early due to timeout
+                    int sizeMB = 64; // Larger test for more realistic sustained performance
                     byte[] buf = new byte[1024 * 1024];
 
-                    using (var cts = new CancellationTokenSource(2000)) // 2000 ms timeout
+                    using (var cts = new CancellationTokenSource(8000)) // 8000 ms timeout for more realistic test
                     {
                         var sw = Stopwatch.StartNew();
                         long writtenBytes = 0;
                         try
                         {
-                            using (var fs = new FileStream(a, FileMode.Create, FileAccess.Write, FileShare.None))
+                            using (var fs = new FileStream(a, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 64 * 1024, FileOptions.SequentialScan))
                             {
                                 for (int i = 0; i < sizeMB; i++)
                                 {
                                     if (cts.IsCancellationRequested) break;
                                     fs.Write(buf, 0, buf.Length);
                                     writtenBytes += buf.Length;
+                                    
+                                    // Force periodic flush to simulate real backup conditions
+                                    if (i % 8 == 0) fs.Flush();
                                 }
                                 fs.Flush();
                             }
@@ -635,16 +683,16 @@ namespace AvatarSmartBackup
                         catch (OperationCanceledException) { }
                         sw.Stop();
 
-                        double writeSec = Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                        double writeSec = Math.Max(0.001, sw.Elapsed.TotalSeconds); // Avoid divide by zero
                         double writtenMB = writtenBytes / (1024.0 * 1024.0);
                         double writeMbps = writtenMB / writeSec;
 
-                        // Read back what we wrote (or as much as possible before timeout)
+                        // Read back test with sequential access pattern
                         sw.Restart();
                         long readBytes = 0;
                         try
                         {
-                            using (var fr = new FileStream(a, FileMode.Open, FileAccess.Read, FileShare.Read))
+                            using (var fr = new FileStream(a, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 64 * 1024, FileOptions.SequentialScan))
                             {
                                 int r;
                                 while ((r = fr.Read(buf, 0, buf.Length)) > 0)
@@ -657,21 +705,30 @@ namespace AvatarSmartBackup
                         catch (OperationCanceledException) { }
                         sw.Stop();
 
-                        double readSec = Math.Max(0.0001, sw.Elapsed.TotalSeconds);
+                        double readSec = Math.Max(0.001, sw.Elapsed.TotalSeconds);
                         double readMB = readBytes / (1024.0 * 1024.0);
                         double readMbps = readMB / readSec;
 
                         try { File.Delete(a); Directory.Delete(dir); } catch { }
 
-                        // If we couldn't measure anything, return 0
-                        if (writtenMB <= 0.0 || readMB <= 0.0) return 0f;
+                        // Conservative result calculation for reliability
+                        if (writtenMB <= 1.0 || readMB <= 1.0) return 0f; // Need meaningful test size
+                        
                         float result = (float)Math.Min(writeMbps, readMbps);
+                        
+                        // Sanity check: if result seems unrealistically high, apply conservative cap
+                        if (result > 2000f)
+                        {
+                            Log.Debug($"Benchmark result {result:0.0} MB/s seems high, applying conservative interpretation");
+                            result = Math.Min(result, 1000f); // Cap unrealistic values
+                        }
+                        
                         return result;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Log.Warn("Benchmark failed: " + ex.Message);
+                    Log.Error($"Benchmark failed: {ex.Message}", "Disk benchmark failed", ex);
                     return 0f;
                 }
             });

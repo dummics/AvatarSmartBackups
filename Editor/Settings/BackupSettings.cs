@@ -36,19 +36,26 @@ namespace AvatarSmartBackup
         public int idleDelaySeconds = 10;             // Seconds of inactivity before zipping when Idle policy
         public bool zipFastest = true;                 // Fastest vs Optimal
         public bool autoThrottle = true;               // Automatic throttling (recommended)
-        public int copyMaxMBps = 250;                  // Manual cap (MB/s). 0 = unlimited
-        public int zipMaxMBps = 150;                   // Manual cap (MB/s). 0 = unlimited
+        public int copyMaxMBps = 100;                  // Conservative manual cap (MB/s). 0 = unlimited
+        public int zipMaxMBps = 50;                    // Conservative manual cap (MB/s). 0 = unlimited  
         public float lastMeasuredMBps = 0f;            // Result of last IO benchmark
         public long lastBenchmarkTicks = 0;            // UTC ticks of last benchmark
         public long lastBackupBytes = 0;                // Size of last backup data
-        public int maxParallelThreads = Math.Max(1, Environment.ProcessorCount);
+        public int maxParallelThreads = Math.Max(1, Math.Min(Environment.ProcessorCount / 2, 4)); // Conservative: half cores, max 4
 
         public bool saveScenesBeforeBackup = false;    // Avoid blocking by default
 
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
+        
+        // Debug-only options
+        public bool enableDebugLogging = false;        // Detailed logging to file (debug mode only)
 
-        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
+        // Cooldowns and anti-spam (seconds)
+        // Reasonable defaults that work automatically - exposed only in debug mode for advanced users
+        public int manualSnapshotCooldownSeconds = 30;   // Longer default to prevent accidental spam
+        public int manualBenchmarkCooldownSeconds = 60;  // Longer to avoid repeated disk stress
+        public int minManualBackupIntervalSeconds = 120; // 2 minutes minimum for manual backups        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
         public bool extWithinIncludeFolders = true;
     }
 }

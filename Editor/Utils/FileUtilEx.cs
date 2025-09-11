@@ -20,7 +20,26 @@ namespace AvatarSmartBackup
         {
             using var md5 = MD5.Create();
             using var stream = File.OpenRead(file);
-            var hash = md5.ComputeHash(stream);
+            
+            // For large files, use buffered reading with periodic yields to prevent UI freezing
+            var buffer = new byte[64 * 1024]; // 64KB buffer
+            long totalRead = 0;
+            int bytesRead;
+            
+            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                md5.TransformBlock(buffer, 0, bytesRead, null, 0);
+                totalRead += bytesRead;
+                
+                // Yield control back to main thread every 1MB to prevent UI freeze
+                if (totalRead % (1024 * 1024) == 0)
+                {
+                    System.Threading.Thread.Yield();
+                }
+            }
+            
+            md5.TransformFinalBlock(buffer, 0, 0);
+            var hash = md5.Hash;
             var sb = new StringBuilder(hash.Length * 2);
             foreach (var b in hash) sb.Append(b.ToString("x2"));
             return sb.ToString();

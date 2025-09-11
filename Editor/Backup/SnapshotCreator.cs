@@ -47,9 +47,9 @@ namespace AvatarSmartBackup
                     return hadChanges;                        // zip solo se ci sono state changes
                 case ZipPolicy.Idle:
                     return !hadChanges;                       // zip quando non ci sono changes
-                case ZipPolicy.OnPlay:
+                case ZipPolicy.Manual:
                 default:
-                    return false;
+                    return false;                             // manual policy: never auto-create
             }
         }
 
@@ -120,12 +120,12 @@ namespace AvatarSmartBackup
                         for (int i = s.keepSnapshots; i < zips.Count; i++)
                             try { File.Delete(zips[i]); } catch { }
                     }
-                    Log.Info($"Created snapshot: {Path.GetFileName(zipPath)}");
+                    Log.Info($"Created snapshot: {Path.GetFileName(zipPath)}", "Snapshot created successfully");
                 }
 
                 catch (Exception ex)
                 {
-                    Log.Err("ZIP error: " + ex.Message);
+                    Log.Error($"Snapshot creation failed: {ex.Message}", "Snapshot creation failed (see log file for details)", ex);
                 }
                 finally
                 {
@@ -154,6 +154,38 @@ namespace AvatarSmartBackup
             catch (Exception ex)
             {
                 Log.Err("Snapshot error: " + ex.Message);
+            }
+        }
+
+        public static async Task RunManualSnapshotAsync(BackupSettings s)
+        {
+            // Anti-spam: cooldown defined in settings
+            if (!BackupManager.TryClaimManualSnapshot(TimeSpan.FromSeconds(s.manualSnapshotCooldownSeconds)))
+            {
+                Log.Warn($"Manual snapshot request ignored due to cooldown ({s.manualSnapshotCooldownSeconds}s remaining)", 
+                        "Snapshot creation rate limited");
+                return;
+            }
+
+            if (BackupManager.IsBusy)
+            {
+                Log.Warn("Manual snapshot request ignored: backup operation is currently running", 
+                        "Cannot create snapshot during backup");
+                return;
+            }
+
+            try
+            {
+                string srcRoot = CurrentDir;
+                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Snapshot", "No Current/ backup found. Run a backup first.", "OK"); return; }
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Snapshot", "Backup in progress or not complete. Try again after it finishes.", "OK"); return; }
+                var cts = new CancellationTokenSource();
+                await CreateZipAsync(s, cts.Token, cts, showUI: true);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"Manual snapshot operation failed: {ex.Message}", "Snapshot creation failed", ex);
             }
         }
     }

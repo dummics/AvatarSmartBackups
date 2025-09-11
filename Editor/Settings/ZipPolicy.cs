@@ -10,7 +10,7 @@ namespace AvatarSmartBackup
     {
         OnChange, // create a snapshot only when files changed
         Idle,     // create a snapshot when no changes were detected
-        OnPlay    // take a snapshot when entering Play Mode
+        Manual    // create snapshots only manually (for limited storage)
     }
 }
 #endif
