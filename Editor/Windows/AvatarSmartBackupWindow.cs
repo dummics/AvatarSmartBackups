@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using AvatarSmartBackup.Versioning;
 
 namespace AvatarSmartBackup
 {
@@ -25,7 +26,6 @@ namespace AvatarSmartBackup
         UnityEngine.Object _includeFolderObj;
         UnityEngine.Object _excludeFolderObj;
     
-        [MenuItem("Tools/Avatar Smart Backup")]
         public static void Open()
         {
             var w = GetWindow<AvatarSmartBackupWindow>(true, "Avatar Smart Backup");
@@ -79,7 +79,10 @@ namespace AvatarSmartBackup
                 EditorGUILayout.HelpBox($"At {effCopy} MB/s, backing up {mb:0.0} MB takes ~{minutesNeeded:0.0} min, exceeding the interval.", MessageType.Warning);
             }
             EditorGUILayout.EndVertical();
-    
+
+            // === VERSION HISTORY (Peace of Mind) ===
+            DrawVersionHistorySection();
+
             // === ACTION BUTTONS (centralized) ===
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Actions", EditorStyles.boldLabel);
@@ -488,6 +491,108 @@ namespace AvatarSmartBackup
             if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
             if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
             return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
+        }
+
+        /// <summary>
+        /// Draws a simple, non-intrusive version history section (peace of mind)
+        /// </summary>
+        void DrawVersionHistorySection()
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Safety History", EditorStyles.boldLabel);
+            
+            // Small info icon
+            if (GUILayout.Button(new GUIContent("ℹ", "Your backups are automatically tracked as versions. Click 'View History' to see all restore points."), GUILayout.Width(20)))
+            {
+                EditorUtility.DisplayDialog("Safety History", 
+                    "Every backup is automatically saved as a version/restore point.\n\n" +
+                    "• Transparent versioning - no manual commits needed\n" +
+                    "• Each backup becomes a restore point\n" +
+                    "• View history to restore from any previous version\n" +
+                    "• Your files are always safe!\n\n" +
+                    "This gives you peace of mind while you create.", "Got it!");
+            }
+            EditorGUILayout.EndHorizontal();
+
+            try
+            {
+                // Try to get version stats (placeholder for now)
+                string versionInfo = GetVersionHistoryInfo();
+                EditorGUILayout.LabelField(versionInfo, EditorStyles.miniLabel);
+                
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button(new GUIContent("View History", "See all backup versions and restore from any point"), GUILayout.Height(18)))
+                {
+                    VersionHistoryWindow.Open();
+                }
+                
+                if (_settings.debugMode && GUILayout.Button(new GUIContent("⚙", "Debug: Version system info"), GUILayout.Width(22)))
+                {
+                    SystemDiagnostics.TestSQLiteConnection();
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+            catch (System.Exception ex)
+            {
+                EditorGUILayout.LabelField("Version history: Initializing...", EditorStyles.miniLabel);
+                if (_settings.debugMode)
+                {
+                    EditorGUILayout.LabelField($"Debug: {ex.Message}", EditorStyles.miniLabel);
+                }
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// Gets version history information in a user-friendly format
+        /// </summary>
+        string GetVersionHistoryInfo()
+        {
+            return ResilientErrorHandler.SafeExecute(() =>
+            {
+                // Use the new simple version manager
+                using var versionManager = new SimpleVersionManager();
+                var stats = versionManager.GetStats();
+                
+                if (stats.TotalVersions == 0)
+                    return "No versions yet - run your first backup!";
+                    
+                return $"🛡️ {stats.DisplayVersions} available ({stats.DisplaySize})";
+            }, ResilientErrorHandler.Component.Versioning, GetFallbackVersionInfo(), "GetVersionHistoryInfo");
+        }
+
+        /// <summary>
+        /// Fallback version info if database fails
+        /// </summary>
+        string GetFallbackVersionInfo()
+        {
+            return ResilientErrorHandler.SafeExecute(() =>
+            {
+                var backupRoot = FileUtilEx.BackupRoot;
+                if (!System.IO.Directory.Exists(backupRoot))
+                    return "No backups yet - versions will appear after first backup";
+
+                var currentDir = System.IO.Path.Combine(backupRoot, "Current");
+                var archiveDir = System.IO.Path.Combine(backupRoot, "Archive");
+                
+                int archiveCount = 0;
+                if (System.IO.Directory.Exists(archiveDir))
+                {
+                    archiveCount = System.IO.Directory.GetFiles(archiveDir, "*.zip").Length;
+                }
+
+                bool hasCurrentBackup = System.IO.Directory.Exists(currentDir) && 
+                                       System.IO.Directory.GetFiles(currentDir, "*", System.IO.SearchOption.AllDirectories).Length > 1;
+
+                int totalVersions = archiveCount + (hasCurrentBackup ? 1 : 0);
+                
+                if (totalVersions == 0)
+                    return "No versions yet - run your first backup!";
+                    
+                return $"🛡️ {totalVersions} safety version{(totalVersions == 1 ? "" : "s")} available";
+            }, ResilientErrorHandler.Component.FileSystem, "Version tracking initializing...", "GetFallbackVersionInfo");
         }
     }
 }

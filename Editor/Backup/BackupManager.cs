@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using static AvatarSmartBackup.SystemHealthMonitor;
 
 namespace AvatarSmartBackup
 {
@@ -283,6 +284,47 @@ namespace AvatarSmartBackup
         {
             try
             {
+                // Pre-backup health check
+                var healthCheck = SystemHealthMonitor.CheckSystemHealth();
+                
+                if (!healthCheck.CanBackup)
+                {
+                    var errorMsg = $"System health critical - backup aborted:\n{healthCheck.GetSummary()}";
+                    Log.Error($"Backup aborted due to critical health issues: {errorMsg}");
+                    if (showToast)
+                        EditorUtility.DisplayDialog("Backup Failed", errorMsg, "OK");
+                    return;
+                }
+
+                if (healthCheck.OverallHealth == HealthStatus.Warning && reason != "timer")
+                {
+                    Log.Warn($"System health warning detected: {healthCheck.GetSummary()}");
+                    if (showProgressUI)
+                    {
+                        var proceed = EditorUtility.DisplayDialog(
+                            "System Health Warning", 
+                            $"System warnings detected:\n{healthCheck.GetSummary()}\n\nProceed with backup?", 
+                            "Yes", "No");
+                        
+                        if (!proceed)
+                        {
+                            Log.Info("Backup cancelled by user due to health warnings");
+                            return;
+                        }
+                    }
+                }
+
+                // Perform maintenance if needed
+                if (healthCheck.VersionCount > 40 || healthCheck.DiskSpaceGB < 5)
+                {
+                    Log.Info("[ASB] Performing automatic maintenance before backup");
+                    var maintenanceResult = BackupMaintenance.PerformMaintenance();
+                    if (maintenanceResult.Success)
+                    {
+                        Log.Info($"Maintenance completed: {maintenanceResult.GetSummary()}");
+                    }
+                }
+
                 if (Interlocked.Exchange(ref _busy, 1) == 1)
                 {
                     Log.Info("Backup already running – queued another run.");
@@ -453,6 +495,10 @@ namespace AvatarSmartBackup
                     SaveSettings(s);
                     TimerService.InvalidateSettingsCache();
                 });
+
+                // === AUTOMATIC VERSION TRACKING (TRANSPARENT) ===
+                // Record this backup as a version automatically - no user intervention needed
+                await RecordBackupAsVersionAsync(reason, man.entries.Count, totalBytes);
             }
             catch (OperationCanceledException)
             {
@@ -743,6 +789,56 @@ namespace AvatarSmartBackup
                 return mb.ToString("0.0") + " MB";
             }
             catch { return bytes + " bytes"; }
+        }
+
+        /// <summary>
+        /// Record backup as version automatically (transparent versioning)
+        /// This runs in background without affecting the user experience
+        /// </summary>
+        static async Task RecordBackupAsVersionAsync(string reason, int fileCount, long totalBytes)
+        {
+            // Use resilient error handling to ensure versioning never breaks backup
+            await Task.Run(() =>
+            {
+                ResilientErrorHandler.SafeExecute(() =>
+                {
+                    using var versionManager = new AvatarSmartBackup.Versioning.SimpleVersionManager();
+                    
+                    // Create user-friendly description
+                    string description = reason switch
+                    {
+                        "manual" => "Manual backup",
+                        "timer" => "Auto backup",
+                        "play-enter" => "Before Play Mode",
+                        "vrchat-preprocess" => "Before VRChat Build",
+                        _ => "Auto backup"
+                    };
+
+                    // Record the version
+                    int versionId = versionManager.RecordBackupAsVersion(
+                        description,
+                        CurrentDir,
+                        fileCount,
+                        totalBytes
+                    );
+
+                    if (versionId > 0)
+                    {
+                        Log.Info($"Version recorded: #{versionId} - {description} ({fileCount} files)");
+                        
+                        // Auto-cleanup old versions (keep last 25 by default)
+                        int cleaned = versionManager.CleanupOldVersions(25);
+                        if (cleaned > 0)
+                        {
+                            Log.Info($"Cleaned up {cleaned} old versions to save space");
+                        }
+                    }
+                    else
+                    {
+                        Log.Warn("Version recording returned invalid ID, but backup completed successfully");
+                    }
+                }, ResilientErrorHandler.Component.Versioning, "RecordBackupAsVersion");
+            });
         }
 
     }
