@@ -59,8 +59,9 @@ namespace AvatarSmartBackup
                 
                 using var database = new AvatarSmartBackup.Versioning.VersionDatabase(tempDbPath);
                 
-                // Test database initialization
-                var testCommitId = database.CreateCommit("Test commit", 5, 1024);
+                // Test database initialization  
+                var testFiles = new System.Collections.Generic.List<AvatarSmartBackup.Versioning.VersionedFile>();
+                var testCommitId = database.CreateCommit("Test commit", testFiles);
                 var commits = database.GetCommitHistory(10);
                 
                 if (commits.Count > 0 && commits[0].Id == testCommitId)

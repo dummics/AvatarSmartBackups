@@ -3,7 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -267,7 +269,7 @@ namespace AvatarSmartBackup.Versioning
             using var stream = File.OpenRead(filePath);
             using var sha1 = SHA1.Create();
             var hash = await Task.Run(() => sha1.ComputeHash(stream));
-            return Convert.ToHexString(hash);
+            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }
         
         private bool ShouldUseDelta(long fileSize, VersionedFile previousVersion)

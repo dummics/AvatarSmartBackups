@@ -442,7 +442,7 @@ namespace AvatarSmartBackup.Windows
             {
                 try
                 {
-                    _tempRestoreDir = await _versionManager.RestoreToTempAsync(commit.Id, filesToPreview);
+                    _tempRestoreDir = await _versionManager.PreviewCommitAsync(commit.Id, filesToPreview);
                     await UnityMainThread.InvokeAsync(() =>
                     {
                         Log.Info($"Files previewed in: {_tempRestoreDir}");
@@ -463,7 +463,7 @@ namespace AvatarSmartBackup.Windows
             {
                 try
                 {
-                    var result = await _versionManager.RestoreToProjectAsync(commitId, filePaths, true);
+                    var result = await _versionManager.RestoreToProjectAsync(commitId, filePaths);
                     
                     await UnityMainThread.InvokeAsync(() =>
                     {
@@ -502,7 +502,7 @@ namespace AvatarSmartBackup.Windows
                 {
                     try
                     {
-                        await _versionManager.CleanupAsync();
+                        await _versionManager.CleanupOldCommitsAsync();
                         await UnityMainThread.InvokeAsync(() =>
                         {
                             RefreshTimeline();
