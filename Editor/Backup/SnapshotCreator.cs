@@ -71,7 +71,7 @@ namespace AvatarSmartBackup
                                          .ToArray();
 
                     // stima dimensione per progress
-                    long totalBytes = files.Sum(f => new FileInfo(f).Length);
+                    long totalBytes = System.Linq.Enumerable.Sum(files, f => new FileInfo(f).Length);
                     long written = 0;
 
                     using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
@@ -80,7 +80,7 @@ namespace AvatarSmartBackup
                         foreach (var abs in files)
                         {
                             ct.ThrowIfCancellationRequested();
-                            string rel = MakeRelTo(abs, CurrentDir).Replace("\\", "/");
+                            string rel = MakeRelTo(abs, CurrentDir).Replace("\\", "/"); 
                             var entry = zip.CreateEntry(rel, s.zipFastest ? System.IO.Compression.CompressionLevel.Fastest : System.IO.Compression.CompressionLevel.Optimal);
                             using var entryStream = entry.Open();
                             using var src = new FileStream(abs, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);

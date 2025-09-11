@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SQLite;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 
 namespace AvatarSmartBackup.Versioning
@@ -143,7 +144,7 @@ namespace AvatarSmartBackup.Versioning
                 commitCmd.Parameters.AddWithValue("@timestamp", timestamp);
                 commitCmd.Parameters.AddWithValue("@message", message);
                 commitCmd.Parameters.AddWithValue("@fileCount", files.Count);
-                commitCmd.Parameters.AddWithValue("@totalSize", files.Sum(f => f.Size));
+                commitCmd.Parameters.AddWithValue("@totalSize", System.Linq.Enumerable.Sum(files, f => f.Size));
                 commitCmd.Parameters.AddWithValue("@parentId", parentId);
                 commitCmd.ExecuteNonQuery();
                 

@@ -28,8 +28,10 @@ namespace AvatarSmartBackup.Windows
         private float _lastRefresh = 0f;
         
         // UI State
+        #pragma warning disable 0414
         private bool _showDetails = true;
         private bool _showFileContents = false;
+        #pragma warning restore 0414
         private string _tempRestoreDir = "";
         private HashSet<string> _selectedFiles = new HashSet<string>();
         
