@@ -105,6 +105,35 @@ namespace AvatarSmartBackup
                 RestorePreviewWindow.Open();
             }
             
+            // VERSION SYSTEM 2.0 - Git-like timeline
+            if (_settings.enableVersionSystem)
+            {
+                EditorGUILayout.Space(3);
+                EditorGUILayout.BeginHorizontal();
+                
+                if (GUILayout.Button(new GUIContent("🕒 Version Timeline", "Open Git-like version timeline with commit history"), GUILayout.Height(22)))
+                {
+                    // Use full qualified name to avoid namespace issues during compilation
+                    var windowType = System.Type.GetType("AvatarSmartBackup.Windows.VersionTimelineWindow");
+                    if (windowType != null)
+                    {
+                        var showWindowMethod = windowType.GetMethod("ShowWindow", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                        showWindowMethod?.Invoke(null, null);
+                    }
+                    else
+                    {
+                        EditorUtility.DisplayDialog("Version System", "Version Timeline Window not available. Please ensure all files are compiled correctly.", "OK");
+                    }
+                }
+                
+                if (GUILayout.Button(new GUIContent("📊 Version Stats", "View version system statistics"), GUILayout.Height(22)))
+                {
+                    ShowVersionStats();
+                }
+                
+                EditorGUILayout.EndHorizontal();
+            }
+            
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the folder where backups are stored."))) 
                 EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
@@ -395,6 +424,70 @@ namespace AvatarSmartBackup
             var pu = new Uri(Path.GetFullPath(p));
             var ru = new Uri(Path.GetFullPath(root) + Path.DirectorySeparatorChar);
             return Uri.UnescapeDataString(ru.MakeRelativeUri(pu).ToString()).Replace('/', Path.DirectorySeparatorChar);
+        }
+        
+        private void ShowVersionStats()
+        {
+            try
+            {
+                // Use reflection to avoid namespace issues during compilation
+                var versionManagerType = System.Type.GetType("AvatarSmartBackup.Versioning.VersionManager");
+                if (versionManagerType == null)
+                {
+                    EditorUtility.DisplayDialog("Version System", "Version system not available. Please ensure all files are compiled correctly.", "OK");
+                    return;
+                }
+                
+                var versionManager = System.Activator.CreateInstance(versionManagerType);
+                var getStatsMethod = versionManagerType.GetMethod("GetVersionStats");
+                
+                if (getStatsMethod != null)
+                {
+                    var stats = getStatsMethod.Invoke(versionManager, null);
+                    if (stats != null)
+                    {
+                        var statsType = stats.GetType();
+                        var totalCommits = statsType.GetProperty("totalCommits")?.GetValue(stats) ?? 0;
+                        var totalFiles = statsType.GetProperty("totalFiles")?.GetValue(stats) ?? 0;
+                        var storageUsed = statsType.GetProperty("storageUsed")?.GetValue(stats) ?? 0L;
+                        var databaseSize = statsType.GetProperty("databaseSize")?.GetValue(stats) ?? 0L;
+                        var compressionRatio = statsType.GetProperty("compressionRatio")?.GetValue(stats) ?? 0.0;
+                        var oldestCommit = statsType.GetProperty("oldestCommit")?.GetValue(stats) as DateTime?;
+                        var latestCommit = statsType.GetProperty("latestCommit")?.GetValue(stats) as DateTime?;
+                        
+                        var message = $"Version System Statistics:\n\n" +
+                                     $"• Total Commits: {totalCommits}\n" +
+                                     $"• Total Files Tracked: {totalFiles}\n" +
+                                     $"• Storage Used: {FormatBytes((long)storageUsed)}\n" +
+                                     $"• Database Size: {FormatBytes((long)databaseSize)}\n" +
+                                     $"• Compression Ratio: {compressionRatio:P1}\n" +
+                                     $"• Oldest Commit: {(oldestCommit?.ToString("yyyy-MM-dd HH:mm") ?? "None")}\n" +
+                                     $"• Latest Commit: {(latestCommit?.ToString("yyyy-MM-dd HH:mm") ?? "None")}";
+                        
+                        EditorUtility.DisplayDialog("Version System Statistics", message, "OK");
+                    }
+                    else
+                    {
+                        EditorUtility.DisplayDialog("Version System", "No version statistics available.", "OK");
+                    }
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Version System", "GetVersionStats method not found.", "OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.DisplayDialog("Error", $"Failed to retrieve version statistics:\n{ex.Message}", "OK");
+            }
+        }
+        
+        private string FormatBytes(long bytes)
+        {
+            if (bytes < 1024) return $"{bytes} B";
+            if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+            if (bytes < 1024 * 1024 * 1024) return $"{bytes / (1024.0 * 1024.0):F1} MB";
+            return $"{bytes / (1024.0 * 1024.0 * 1024.0):F1} GB";
         }
     }
 }

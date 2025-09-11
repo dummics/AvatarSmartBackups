@@ -50,6 +50,14 @@ namespace AvatarSmartBackup
         
         // Debug-only options
         public bool enableDebugLogging = false;        // Detailed logging to file (debug mode only)
+        
+        // VERSION SYSTEM 2.0 - Git-like backup with timeline
+        public bool enableVersionSystem = false;       // Enable new version system (experimental)
+        public int maxVersionHistory = 50;             // Maximum versions to keep in timeline
+        public int maxVersionStorageMB = 2048;         // Maximum storage for version system (MB)
+        public int versionRetentionDays = 30;          // Days to keep versions
+        public bool autoCreateVersions = true;         // Automatically create versions on backup
+        public string versionCommitTemplate = "Auto backup: {reason}"; // Template for auto commits
 
         // Cooldowns and anti-spam (seconds)
         // Reasonable defaults that work automatically - exposed only in debug mode for advanced users
