@@ -447,6 +447,35 @@ namespace AvatarSmartBackup
                 string detailedMsg = $"Backup completed. Copied {copied}, Skipped {skipped}, Total {man.entries.Count} files.";
                 Log.Info(detailedMsg, "Backup completed successfully");
 
+                // Create version for this backup (only if there were changes or it's a manual backup)
+                if (copied > 0 || reason == "manual")
+                {
+                    try
+                    {
+                        using var versionManager = new AvatarSmartBackup.Versioning.FileBasedVersionManager();
+                        string versionDescription = reason switch
+                        {
+                            "manual" => "Manual backup",
+                            "play-enter" => "Before Play Mode",
+                            "vrchat-preprocess" => "Before VRChat Build",
+                            _ => "Auto backup"
+                        };
+                        
+                        bool versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir);
+                        if (versionCreated)
+                        {
+                            Log.Info("Version created for this backup");
+                        }
+                        
+                        // Cleanup old versions (keep last 10)
+                        versionManager.CleanupOldVersions(10);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warn($"Version creation failed (backup still successful): {ex.Message}");
+                    }
+                }
+
                 s.lastBackupBytes = totalBytes;
                 MainThread.Invoke(() =>
                 {

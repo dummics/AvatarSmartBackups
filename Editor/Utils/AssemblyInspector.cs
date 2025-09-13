@@ -7,30 +7,34 @@ namespace AvatarSmartBackup.Debugging
 {
     public static class AssemblyInspector
     {
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Test JSON Version Manager")] 
-        public static void TestJsonVersionManager()
+        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Test File-Based Version Manager")] 
+        public static void TestFileBasedVersionManager()
         {
             try
             {
-                using var vm = new AvatarSmartBackup.Versioning.JsonVersionManager();
+                using var vm = new AvatarSmartBackup.Versioning.FileBasedVersionManager();
                 
-                // Test recording a version
-                int id = vm.RecordBackupAsVersion("Test Version", "C:\\Test\\Path", 42, 1024 * 1024);
-                Debug.Log($"Recorded version with ID: {id}");
+                // Test creating a version
+                string currentDir = System.IO.Path.Combine(FileUtilEx.BackupRoot, "Current");
+                bool created = vm.CreateVersion("Test Version", currentDir);
+                Debug.Log($"Version creation result: {created}");
                 
                 // Test getting versions
                 var versions = vm.GetVersions();
                 Debug.Log($"Total versions: {versions.Count}");
+                foreach (var v in versions)
+                {
+                    Debug.Log($"Version {v.id}: {v.description} at {v.timestamp}");
+                }
                 
-                // Test stats
-                var stats = vm.GetStats();
-                Debug.Log($"Stats - Total: {stats.TotalVersions}, Size: {stats.TotalSizeBytes} bytes");
+                // Test cleanup
+                vm.CleanupOldVersions(5);
                 
-                Debug.Log("JSON Version Manager test completed successfully!");
+                Debug.Log("File-Based Version Manager test completed!");
             }
             catch (Exception ex)
             {
-                Debug.LogError($"JSON Version Manager test failed: {ex.Message}");
+                Debug.LogError($"File-Based Version Manager test failed: {ex.Message}");
             }
         }
     }
