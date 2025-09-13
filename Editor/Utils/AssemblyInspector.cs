@@ -12,7 +12,7 @@ namespace AvatarSmartBackup.Debugging
         {
             try
             {
-                using var vm = new AvatarSmartBackup.Versioning.FileBasedVersionManager();
+                using var vm = new FileBasedVersionManager();
                 
                 // Test creating a version
                 string currentDir = System.IO.Path.Combine(FileUtilEx.BackupRoot, "Current");

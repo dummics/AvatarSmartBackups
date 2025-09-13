@@ -4,8 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using UnityEngine;
-
-namespace AvatarSmartBackup.Versioning
+// Force recompilation
+#pragma warning disable 0414
+namespace AvatarSmartBackup
 {
     /// <summary>
     /// Simple file-based versioning system
@@ -55,13 +56,36 @@ namespace AvatarSmartBackup.Versioning
         {
             try
             {
+                index.schemaVersion = VersionIndex.CurrentSchemaVersion;
                 string json = JsonUtility.ToJson(index, true);
-                File.WriteAllText(_indexFile, json);
+                string tmp = _indexFile + ".tmp";
+                File.WriteAllText(tmp, json);
+                if (File.Exists(_indexFile)) File.Delete(_indexFile);
+                File.Move(tmp, _indexFile);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[ASB] Failed to save versions index: {ex.Message}");
             }
+        }
+
+        private bool MigrateIndexIfNeeded(VersionIndex index)
+        {
+            bool changed = false;
+            if (index.schemaVersion <= 0)
+            {
+                // Schema upgrade: add missing fields
+                foreach (var v in index.versions)
+                {
+                    if (string.IsNullOrEmpty(v.guid)) { v.guid = System.Guid.NewGuid().ToString("N"); changed = true; }
+                    if (string.IsNullOrEmpty(v.createdUtc)) { v.createdUtc = v.timestamp == default ? DateTime.UtcNow.ToString("o") : v.timestamp.ToUniversalTime().ToString("o"); changed = true; }
+                    // size/fileCount left 0 until lazy computed
+                    if (string.IsNullOrEmpty(v.manifestFile)) { v.manifestFile = $"v{v.id:D3}/manifest.json"; changed = true; }
+                }
+                index.schemaVersion = VersionIndex.CurrentSchemaVersion;
+                changed = true;
+            }
+            return changed;
         }
 
         /// <summary>
@@ -77,24 +101,51 @@ namespace AvatarSmartBackup.Versioning
                 var version = new VersionInfo
                 {
                     id = nextId,
-                    description = description,
+                    description = string.IsNullOrWhiteSpace(description) ? $"Version {nextId}" : description.Trim(),
                     timestamp = DateTime.UtcNow,
-                    backupPath = currentBackupPath
+                    backupPath = currentBackupPath,
+                    guid = Guid.NewGuid().ToString("N"),
+                    createdUtc = DateTime.UtcNow.ToString("o"),
+                    pinned = false,
+                    incomplete = true, // mark incomplete until fully written
+                    manifestFile = $"v{nextId:D3}/manifest.json",
+                    toolVersion = 1
                 };
 
                 // Create version directory
                 string versionDir = Path.Combine(_versionsRoot, $"v{nextId:D3}");
                 Directory.CreateDirectory(versionDir);
 
-                // Copy manifest for reference
+                long totalSize = 0;
+                int fileCount = 0;
+
+                // Copy manifest for reference (also collect size metrics lazily from file if present)
                 string manifestSrc = Path.Combine(currentBackupPath, "manifest.json");
                 if (File.Exists(manifestSrc))
                 {
                     File.Copy(manifestSrc, Path.Combine(versionDir, "manifest.json"), true);
+                    try
+                    {
+                        var json = File.ReadAllText(manifestSrc);
+                        // Lightweight parse with JsonUtility requires wrapper; fallback quick scan
+                        // We'll do a naive size accumulation from Current directory instead (safer & cheap for version creation)
+                        var files = Directory.GetFiles(currentBackupPath, "*", SearchOption.AllDirectories)
+                            .Where(p => !p.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) && !p.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase) && !p.EndsWith("backup.ok", StringComparison.OrdinalIgnoreCase));
+                        foreach (var f in files)
+                        {
+                            try { var fi = new FileInfo(f); totalSize += fi.Length; fileCount++; } catch { }
+                        }
+                    }
+                    catch { }
                 }
+
+                version.totalSizeBytes = totalSize;
+                version.fileCount = fileCount;
+                version.incomplete = false; // mark complete
 
                 // Add to index
                 index.versions.Add(version);
+                MigrateIndexIfNeeded(index); // ensure schemaVersion set
                 SaveIndex(index);
 
                 Debug.Log($"[ASB] Created version {nextId}: {description}");
@@ -113,6 +164,7 @@ namespace AvatarSmartBackup.Versioning
         public List<VersionInfo> GetVersions()
         {
             var index = LoadIndex();
+            if (MigrateIndexIfNeeded(index)) SaveIndex(index);
             return index.versions.OrderByDescending(v => v.timestamp).ToList();
         }
 
@@ -185,17 +237,51 @@ namespace AvatarSmartBackup.Versioning
             return index.versions.Count;
         }
 
+        public bool SetPinned(int id, bool pinned)
+        {
+            try
+            {
+                var index = LoadIndex();
+                var v = index.versions.FirstOrDefault(x => x.id == id);
+                if (v == null) return false;
+                if (v.pinned == pinned) return true;
+                v.pinned = pinned;
+                SaveIndex(index);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ASB] Failed to set pin for version {id}: {ex.Message}");
+                return false;
+            }
+        }
+
+        public bool UpdateDescription(int id, string newDescription)
+        {
+            try
+            {
+                newDescription = string.IsNullOrWhiteSpace(newDescription) ? null : newDescription.Trim();
+                var index = LoadIndex();
+                var v = index.versions.FirstOrDefault(x => x.id == id);
+                if (v == null) return false;
+                if (newDescription == null) return false;
+                if (v.description == newDescription) return true;
+                v.description = newDescription;
+                SaveIndex(index);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ASB] Failed to update description for version {id}: {ex.Message}");
+                return false;
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
         }
-    }
-
-    [Serializable]
-    public class VersionIndex
-    {
-        public List<VersionInfo> versions;
     }
 
     [Serializable]
@@ -205,6 +291,23 @@ namespace AvatarSmartBackup.Versioning
         public string description;
         public DateTime timestamp;
         public string backupPath;
+        public string guid;
+        public string createdUtc; // ISO 8601
+        public long totalSizeBytes;
+        public int fileCount;
+        public bool pinned;
+        public string manifestFile; // relative path inside Versions root
+        public bool incomplete;
+        public int toolVersion;
     }
+
+    [Serializable]
+    public class VersionIndex
+    {
+        public static int CurrentSchemaVersion = 1;
+        public int schemaVersion;
+        public List<VersionInfo> versions;
+    }
+
 }
 #endif

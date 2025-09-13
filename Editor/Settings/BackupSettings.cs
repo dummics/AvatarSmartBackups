@@ -57,6 +57,10 @@ namespace AvatarSmartBackup
         public int manualBenchmarkCooldownSeconds = 60;  // Longer to avoid repeated disk stress
         public int minManualBackupIntervalSeconds = 120; // 2 minutes minimum for manual backups        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
         public bool extWithinIncludeFolders = true;
+
+    // UI state (non critico, serializzato con settings)
+    public int _activeTab = 0;              // 0 = Backup, 1 = Versions
+    public bool _uiTabInitialized = false;  // evita reset ad ogni domain reload
     }
 }
 #endif

@@ -452,7 +452,7 @@ namespace AvatarSmartBackup
                 {
                     try
                     {
-                        using var versionManager = new AvatarSmartBackup.Versioning.FileBasedVersionManager();
+                        using var versionManager = new FileBasedVersionManager();
                         string versionDescription = reason switch
                         {
                             "manual" => "Manual backup",
