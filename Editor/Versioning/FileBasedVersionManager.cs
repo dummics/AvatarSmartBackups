@@ -81,9 +81,17 @@ namespace AvatarSmartBackup
                     if (string.IsNullOrEmpty(v.createdUtc)) { v.createdUtc = v.timestamp == default ? DateTime.UtcNow.ToString("o") : v.timestamp.ToUniversalTime().ToString("o"); changed = true; }
                     // size/fileCount left 0 until lazy computed
                     if (string.IsNullOrEmpty(v.manifestFile)) { v.manifestFile = $"v{v.id:D3}/manifest.json"; changed = true; }
+                    if (!v.corrupt) v.corrupt = false; // field init (safety)
                 }
                 index.schemaVersion = VersionIndex.CurrentSchemaVersion;
                 changed = true;
+            }
+            else if (index.schemaVersion < VersionIndex.CurrentSchemaVersion)
+            {
+                // Future simple forward migration (v1 -> v2 adds 'corrupt' field)
+                foreach (var v in index.versions)
+                    if (!v.corrupt) v.corrupt = false;
+                index.schemaVersion = VersionIndex.CurrentSchemaVersion; changed = true;
             }
             return changed;
         }
@@ -109,39 +117,42 @@ namespace AvatarSmartBackup
                     pinned = false,
                     incomplete = true, // mark incomplete until fully written
                     manifestFile = $"v{nextId:D3}/manifest.json",
-                    toolVersion = 1
+                    toolVersion = 1,
+                    corrupt = false
                 };
 
                 // Create version directory
                 string versionDir = Path.Combine(_versionsRoot, $"v{nextId:D3}");
                 Directory.CreateDirectory(versionDir);
 
-                long totalSize = 0;
-                int fileCount = 0;
-
-                // Copy manifest for reference (also collect size metrics lazily from file if present)
-                string manifestSrc = Path.Combine(currentBackupPath, "manifest.json");
-                if (File.Exists(manifestSrc))
+                long totalSize = 0; int fileCount = 0;
+                // Copy files from current backup into dedicated version folder
+                foreach (var src in Directory.GetFiles(currentBackupPath, "*", SearchOption.AllDirectories))
                 {
-                    File.Copy(manifestSrc, Path.Combine(versionDir, "manifest.json"), true);
+                    string name = Path.GetFileName(src);
+                    if (name.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue; // skip marker
+                    // We always copy manifest.json + assets + meta
+                    string rel = MakeRelative(src, currentBackupPath);
+                    string dst = Path.Combine(versionDir, rel);
                     try
                     {
-                        var json = File.ReadAllText(manifestSrc);
-                        // Lightweight parse with JsonUtility requires wrapper; fallback quick scan
-                        // We'll do a naive size accumulation from Current directory instead (safer & cheap for version creation)
-                        var files = Directory.GetFiles(currentBackupPath, "*", SearchOption.AllDirectories)
-                            .Where(p => !p.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) && !p.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase) && !p.EndsWith("backup.ok", StringComparison.OrdinalIgnoreCase));
-                        foreach (var f in files)
-                        {
-                            try { var fi = new FileInfo(f); totalSize += fi.Length; fileCount++; } catch { }
-                        }
+                        Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                        File.Copy(src, dst, true);
                     }
-                    catch { }
+                    catch (Exception copyEx)
+                    {
+                        Debug.LogWarning($"[ASB] Failed to copy file into version {nextId}: {rel} -> {copyEx.Message}");
+                        version.corrupt = true;
+                    }
+                    // Stats only count non-meta, non manifest like previous logic
+                    if (!rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) && !rel.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase))
+                    {
+                        try { var fi = new FileInfo(src); totalSize += fi.Length; fileCount++; } catch { }
+                    }
                 }
-
-                version.totalSizeBytes = totalSize;
-                version.fileCount = fileCount;
-                version.incomplete = false; // mark complete
+                version.totalSizeBytes = totalSize; version.fileCount = fileCount; version.incomplete = false;
+                // marker file for version completeness
+                try { File.WriteAllText(Path.Combine(versionDir, "version.ok"), "ok" ); } catch { }
 
                 // Add to index
                 index.versions.Add(version);
@@ -165,6 +176,27 @@ namespace AvatarSmartBackup
         {
             var index = LoadIndex();
             if (MigrateIndexIfNeeded(index)) SaveIndex(index);
+            bool changed = false;
+            foreach (var v in index.versions)
+            {
+                // Perform basic integrity: count + size must match metadata; folder must exist
+                string versionDir = Path.Combine(_versionsRoot, $"v{v.id:D3}");
+                if (!Directory.Exists(versionDir)) { v.corrupt = true; changed = true; continue; }
+                long size = 0; int count = 0;
+                try
+                {
+                    foreach (var f in Directory.GetFiles(versionDir, "*", SearchOption.AllDirectories))
+                    {
+                        string rel = MakeRelative(f, versionDir);
+                        if (rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) || rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
+                        try { var fi = new FileInfo(f); size += fi.Length; count++; } catch { }
+                    }
+                }
+                catch { v.corrupt = true; changed = true; continue; }
+                bool mismatch = (v.fileCount != count) || (v.totalSizeBytes != size);
+                if (mismatch && !v.corrupt) { v.corrupt = true; changed = true; }
+            }
+            if (changed) SaveIndex(index);
             return index.versions.OrderByDescending(v => v.timestamp).ToList();
         }
 
@@ -317,6 +349,14 @@ namespace AvatarSmartBackup
             if (_disposed) return;
             _disposed = true;
         }
+
+        // Helpers
+        private static string MakeRelative(string file, string root)
+        {
+            var ru = new Uri(Path.GetFullPath(root) + Path.DirectorySeparatorChar);
+            var fu = new Uri(Path.GetFullPath(file));
+            return Uri.UnescapeDataString(ru.MakeRelativeUri(fu).ToString()).Replace('/', Path.DirectorySeparatorChar);
+        }
     }
 
     [Serializable]
@@ -334,12 +374,13 @@ namespace AvatarSmartBackup
         public string manifestFile; // relative path inside Versions root
         public bool incomplete;
         public int toolVersion;
+        public bool corrupt; // set true if integrity check mismatch
     }
 
     [Serializable]
     public class VersionIndex
     {
-        public static int CurrentSchemaVersion = 1;
+        public static int CurrentSchemaVersion = 2;
         public int schemaVersion;
         public List<VersionInfo> versions;
     }

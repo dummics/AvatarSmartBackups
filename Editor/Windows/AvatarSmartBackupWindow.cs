@@ -226,6 +226,8 @@ namespace AvatarSmartBackup
     int? pendingDelete = null;
         foreach (var v in _cachedVersions.OrderByDescending(v => v.pinned).ThenByDescending(v => v.timestamp))
         {
+            // Hard reset di sicurezza per evitare stato disabled ereditato
+            GUI.enabled = true;
             bool isSelected = v.id == _selectedVersionId;
             if (_selectedTitleStyle == null)
                 _selectedTitleStyle = new GUIStyle(EditorStyles.boldLabel) { fontSize = EditorStyles.boldLabel.fontSize + 1 };
@@ -274,11 +276,25 @@ namespace AvatarSmartBackup
             bool isHover = cardRect.Contains(e.mousePosition);
             if (Event.current.type == EventType.Repaint)
             {
-                // Colori più netti (meno "faded") e differenziazione hover
-                Color col = isSelected ? new Color(0.16f,0.34f,0.58f,0.85f)
-                    : isHover ? new Color(0.30f,0.30f,0.30f,0.55f)
-                    : new Color(0.19f,0.19f,0.19f,0.45f);
-                EditorGUI.DrawRect(cardRect, col);
+                // Niente fill sopra il contenuto: solo un accento visivo non invasivo
+                if (isSelected)
+                {
+                    var bar = new Rect(cardRect.x, cardRect.y, 4f, cardRect.height);
+                    EditorGUI.DrawRect(bar, new Color(0.30f,0.65f,1f,0.95f));
+                    // Sottile outline semi trasparente (dietro testo non lo schiaccia)
+                    Handles.BeginGUI();
+                    Handles.color = new Color(0.30f,0.65f,1f,0.35f);
+                    Handles.DrawAAPolyLine(1.5f, new Vector3(cardRect.x, cardRect.y), new Vector3(cardRect.xMax, cardRect.y));
+                    Handles.DrawAAPolyLine(1.5f, new Vector3(cardRect.xMax, cardRect.y), new Vector3(cardRect.xMax, cardRect.yMax));
+                    Handles.DrawAAPolyLine(1.5f, new Vector3(cardRect.xMax, cardRect.yMax), new Vector3(cardRect.x, cardRect.yMax));
+                    Handles.DrawAAPolyLine(1.5f, new Vector3(cardRect.x, cardRect.yMax), new Vector3(cardRect.x, cardRect.y));
+                    Handles.EndGUI();
+                }
+                else if (isHover)
+                {
+                    var bar = new Rect(cardRect.x, cardRect.y, 3f, cardRect.height);
+                    EditorGUI.DrawRect(bar, new Color(1f,1f,1f,0.25f));
+                }
             }
             if (e.type == EventType.MouseDown && e.button == 0 && cardRect.Contains(e.mousePosition))
             { if (!starRect.Contains(e.mousePosition) && !folderBtnRect.Contains(e.mousePosition)) { double now = EditorApplication.timeSinceStartup; bool db = (_lastClickId == v.id) && (now - _lastClickTime < 0.35f); _lastClickId = v.id; _lastClickTime = now; _selectedVersionId = v.id; GUI.FocusControl(""); Repaint(); if (db) RestorePreviewWindow.Open(v.id); e.Use(); } }

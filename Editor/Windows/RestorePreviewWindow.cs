@@ -21,12 +21,18 @@ namespace AvatarSmartBackup
     bool _backupBefore = true;
     bool _hideMeta = true;
     bool _advanced = false; // Easy mode default
-    bool _groupByCategory = true;
+    bool _showNew = true, _showChanged = true, _showSame = true;
     string _filter = string.Empty;
+    string _lastFilter = string.Empty;
     Dictionary<string,int> _extCounts = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
     Dictionary<string,int> _assetTypeCounts = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase);
     enum DiffState { Same, Changed, New, Missing }
     class FileDiffInfo { public string rel; public DiffState state; public long size; public long projectSize; public string category; }
+    class CategoryGroup { public string name; public List<int> indices = new List<int>(); public bool expanded = false; }
+    Dictionary<string, CategoryGroup> _categoryMap = new Dictionary<string, CategoryGroup>(StringComparer.OrdinalIgnoreCase);
+    List<CategoryGroup> _categoriesOrdered = new List<CategoryGroup>();
+    Dictionary<string,int> _fileIndex = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase); // rel -> index in _files
+    bool _enumerationFallbackUsed = false;
     
         public static void Open(int versionId)
         {
@@ -44,47 +50,63 @@ namespace AvatarSmartBackup
             _files.Clear(); _selected.Clear();
             _extCounts.Clear(); _assetTypeCounts.Clear();
             _diffInfos.Clear();
+            _fileIndex.Clear();
+            _categoryMap.Clear();
+            _categoriesOrdered.Clear();
+            _enumerationFallbackUsed = false;
             string srcRoot = _versionId > 0 ? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
             if (!Directory.Exists(srcRoot)) return;
             // Per la cartella Current richiediamo backup.ok. Per le versioni archiviate assumiamo già completate salvo file mancante.
             var ok = Path.Combine(srcRoot, "backup.ok");
             if (_versionId <= 0 && !File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
-            foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
+            int added = 0;
+            void Enumerate(bool relaxed)
             {
-                string rel = BackupManager.MakeRelTo(src, srcRoot).Replace("\\", "/");
-                if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
-                if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue;
-                _files.Add(rel);
-                _selected.Add(true);
-    
-                // estensione count
-                string ext = Path.GetExtension(rel);
-                if (string.IsNullOrEmpty(ext)) ext = "(no ext)";
-                if (!_extCounts.ContainsKey(ext)) _extCounts[ext] = 0;
-                _extCounts[ext]++;
-    
-                // per .asset proviamo a riconoscere tipi comuni VRC
-                if (ext.Equals(".asset", StringComparison.OrdinalIgnoreCase))
+                foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
                 {
-                    try
+                    string rel = BackupManager.MakeRelTo(src, srcRoot).Replace("\\", "/");
+                    if (!relaxed && !rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase) || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
+                    _files.Add(rel);
+                    _selected.Add(true);
+                    _fileIndex[rel] = _files.Count - 1;
+    
+                    // estensione count
+                    string ext = Path.GetExtension(rel);
+                    if (string.IsNullOrEmpty(ext)) ext = "(no ext)";
+                    if (!_extCounts.ContainsKey(ext)) _extCounts[ext] = 0;
+                    _extCounts[ext]++;
+    
+                    // per .asset proviamo a riconoscere tipi comuni VRC
+                    if (ext.Equals(".asset", StringComparison.OrdinalIgnoreCase))
                     {
-                        // leggi una porzione iniziale (file di testo YAML) per cercare indizi
-                        using var sr = new StreamReader(src, Encoding.UTF8);
-                        char[] buffer = new char[32 * 1024];
-                        int read = sr.Read(buffer, 0, buffer.Length);
-                        string sample = new string(buffer, 0, Math.Max(0, read));
-                        string typeLabel = "Unknown .asset";
-                        if (sample.IndexOf("VRCExpressionsMenu", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpressionsMenu";
-                        else if (sample.IndexOf("VRCExpressionParameters", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpressionParameters";
-                        else if (sample.IndexOf("VRCExpression", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpression (other)";
-                        else if (sample.IndexOf("m_Script", StringComparison.OrdinalIgnoreCase) >= 0 && sample.IndexOf("MonoBehaviour", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "MonoBehaviour.asset";
-                        if (!_assetTypeCounts.ContainsKey(typeLabel)) _assetTypeCounts[typeLabel] = 0;
-                        _assetTypeCounts[typeLabel]++;
+                        try
+                        {
+                            using var sr = new StreamReader(src, Encoding.UTF8);
+                            char[] buffer = new char[8 * 1024];
+                            int read = sr.Read(buffer, 0, buffer.Length);
+                            string sample = new string(buffer, 0, Math.Max(0, read));
+                            string typeLabel = "Unknown .asset";
+                            if (sample.IndexOf("VRCExpressionsMenu", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpressionsMenu";
+                            else if (sample.IndexOf("VRCExpressionParameters", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpressionParameters";
+                            else if (sample.IndexOf("VRCExpression", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "VRCExpression (other)";
+                            else if (sample.IndexOf("m_Script", StringComparison.OrdinalIgnoreCase) >= 0 && sample.IndexOf("MonoBehaviour", StringComparison.OrdinalIgnoreCase) >= 0) typeLabel = "MonoBehaviour.asset";
+                            if (!_assetTypeCounts.ContainsKey(typeLabel)) _assetTypeCounts[typeLabel] = 0;
+                            _assetTypeCounts[typeLabel]++;
+                        }
+                        catch { if (!_assetTypeCounts.ContainsKey("Unknown .asset")) _assetTypeCounts["Unknown .asset"] = 0; _assetTypeCounts["Unknown .asset"]++; }
                     }
-                    catch { if (!_assetTypeCounts.ContainsKey("Unknown .asset")) _assetTypeCounts["Unknown .asset"] = 0; _assetTypeCounts["Unknown .asset"]++; }
+                    added++;
                 }
+            };
+            Enumerate(relaxed:false);
+            if (added == 0)
+            { // fallback diagnostico (magari i file non hanno prefisso Assets/ per qualche motivo)
+                Enumerate(relaxed:true);
+                if (_files.Count > 0) { _enumerationFallbackUsed = true; }
             }
             BuildDiff(srcRoot);
+            RebuildCategories();
         }
 
         void BuildDiff(string versionRoot)
@@ -106,6 +128,22 @@ namespace AvatarSmartBackup
             }
         }
 
+        void RebuildCategories()
+        {
+            _categoryMap.Clear(); _categoriesOrdered.Clear();
+            for (int i = 0; i < _diffInfos.Count; i++)
+            {
+                var cat = _diffInfos[i].category ?? "Other";
+                if (!_categoryMap.TryGetValue(cat, out var grp))
+                {
+                    grp = new CategoryGroup { name = cat, expanded = false };
+                    _categoryMap[cat] = grp; _categoriesOrdered.Add(grp);
+                }
+                grp.indices.Add(i);
+            }
+            _categoriesOrdered.Sort((a,b)=>string.Compare(a.name,b.name,StringComparison.OrdinalIgnoreCase));
+        }
+
         string Classify(string rel)
         {
             string ext = Path.GetExtension(rel).ToLowerInvariant();
@@ -122,20 +160,49 @@ namespace AvatarSmartBackup
         {
             // Assicurati che eventuali cambi colore precedenti non contaminino tutto
             GUI.color = Color.white;
-            EditorGUILayout.LabelField($"Restore Preview {( _versionId>0?"v"+_versionId.ToString("D3"):"Current")}", EditorStyles.boldLabel);
-            EditorGUILayout.BeginHorizontal();
-            _advanced = GUILayout.Toggle(_advanced, _advanced ? "Advanced" : "Easy", "Button", GUILayout.Width(80));
+            EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
+            _advanced = GUILayout.Toggle(_advanced, _advanced ? "Advanced" : "Easy", "Button", GUILayout.Width(84));
             GUILayout.Space(6);
-            if (_advanced)
-                _groupByCategory = GUILayout.Toggle(_groupByCategory, "Group", "Button", GUILayout.Width(60));
+            EditorGUILayout.LabelField($"Restore Preview {( _versionId>0?"v"+_versionId.ToString("D3"):"Current")}", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             if (_advanced)
-                _filter = GUILayout.TextField(_filter, GUI.skin.FindStyle("ToolbarSeachTextField") ?? GUI.skin.textField, GUILayout.Width(160));
+            {
+                _showNew = GUILayout.Toggle(_showNew, new GUIContent("N","Mostra New"), "Button", GUILayout.Width(24));
+                _showChanged = GUILayout.Toggle(_showChanged, new GUIContent("C","Mostra Changed"), "Button", GUILayout.Width(24));
+                _showSame = GUILayout.Toggle(_showSame, new GUIContent("S","Mostra Same"), "Button", GUILayout.Width(24));
+                GUILayout.Space(6);
+                _hideMeta = GUILayout.Toggle(_hideMeta, new GUIContent(".meta","Nascondi .meta"), "Button", GUILayout.Width(48));
+                GUILayout.Space(6);
+                _filter = GUILayout.TextField(_filter, GUI.skin.FindStyle("ToolbarSeachTextField") ?? GUI.skin.textField, GUILayout.Width(170));
+            }
             EditorGUILayout.EndHorizontal();
+            if (_advanced && _filter != _lastFilter)
+            {
+                // Auto-expand only categories containing matches; collapse others. Empty filter -> collapse all.
+                if (string.IsNullOrEmpty(_filter))
+                {
+                    foreach (var c in _categoriesOrdered) c.expanded = false;
+                }
+                else
+                {
+                    foreach (var c in _categoriesOrdered)
+                    {
+                        bool any = false;
+                        for (int ci=0; ci<c.indices.Count; ci++)
+                        {
+                            var di = _diffInfos[c.indices[ci]];
+                            if (_hideMeta && di.rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (di.rel.IndexOf(_filter, StringComparison.OrdinalIgnoreCase) >= 0) { any = true; break; }
+                        }
+                        c.expanded = any;
+                    }
+                }
+                _lastFilter = _filter;
+            }
             if (!_advanced)
                 EditorGUILayout.HelpBox("Easy Mode: ripristina tutti i file della versione. Clicca Advanced per selezionare o vedere differenze.", MessageType.Info);
             else
-                EditorGUILayout.HelpBox("Advanced Mode: vedi differenze vs progetto attuale. Stato: New (verde), Changed (giallo), Same (grigio).", MessageType.Info);
+                EditorGUILayout.HelpBox("Advanced: usa i bottoni N/C/S per filtrare stati. Verde=New, Giallo=Changed, Grigio=Same.", MessageType.Info);
     
             if (_advanced)
             {
@@ -185,69 +252,143 @@ namespace AvatarSmartBackup
             {
                 EditorGUILayout.Space(6);
                 EditorGUILayout.BeginVertical("box");
-                var visibleIdx = new List<int>(_files.Count);
-                for (int i = 0; i < _files.Count; i++)
-                {
-                    if (_hideMeta && _files[i].EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (!string.IsNullOrEmpty(_filter) && !_files[i].Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
-                    visibleIdx.Add(i);
-                }
-                int selCount = visibleIdx.Count(idx => _selected[idx]);
-                EditorGUILayout.LabelField($"Items: {visibleIdx.Count}    Selected: {selCount}", EditorStyles.miniLabel);
+                // Costruisci lista filtrata ottimizzata evitando O(n^2)
+                // Costruiamo vista per categorie con foldout + tri-state
+                int totalVisible = 0; int totalSelectedVisible = 0;
                 _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.MinHeight(220));
-                IEnumerable<FileDiffInfo> ordered;
-                if (_groupByCategory)
-                    ordered = _diffInfos.Where(d => visibleIdx.Contains(_files.IndexOf(d.rel))).OrderBy(d => d.category).ThenBy(d => d.rel);
-                else
-                    ordered = _diffInfos.Where(d => visibleIdx.Contains(_files.IndexOf(d.rel))).OrderBy(d => d.rel);
-                string currentCat = null;
-                foreach (var d in ordered)
+                foreach (var cat in _categoriesOrdered)
                 {
-                    int i = _files.IndexOf(d.rel);
-                    if (i < 0) continue;
-                    if (_groupByCategory && currentCat != d.category)
-                    { currentCat = d.category; EditorGUILayout.LabelField(currentCat, EditorStyles.miniBoldLabel); }
-                    EditorGUILayout.BeginHorizontal();
-                    _selected[i] = EditorGUILayout.Toggle(_selected[i], GUILayout.Width(16));
-                    GUIContent gc = new GUIContent(d.rel, d.state.ToString());
-                    // Colore solo per l'etichetta diff senza inquinare resto UI
-                    using (new GuiColorScope(d.state == DiffState.New ? new Color(0.55f, 0.85f, 0.55f, 1f)
-                        : d.state == DiffState.Changed ? new Color(0.95f,0.85f,0.55f,1f)
-                        : d.state == DiffState.Same ? new Color(0.8f,0.8f,0.8f,0.8f)
-                        : GUI.color))
+                    // Calcola stato selezione e filtra elementi per questa categoria
+                    int catVisible = 0; int catSelected = 0;
+                    for (int ci = 0; ci < cat.indices.Count; ci++)
                     {
-                        EditorGUILayout.LabelField(gc, GUILayout.ExpandWidth(true));
+                        var di = _diffInfos[cat.indices[ci]];
+                        if (_hideMeta && di.rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (!string.IsNullOrEmpty(_filter) && !di.rel.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
+                        catVisible++;
+                        if (_selected[_fileIndex[di.rel]]) catSelected++;
                     }
-                    EditorGUILayout.LabelField(FormatSize(d.size), GUILayout.Width(70));
+                    if (catVisible == 0 && !string.IsNullOrEmpty(_filter))
+                    {
+                        // Se filtro attivo e nessun match, non disegniamo la categoria
+                        continue;
+                    }
+                    totalVisible += catVisible; totalSelectedVisible += catSelected;
+
+                    Rect foldRect = EditorGUILayout.BeginHorizontal();
+                    // Tri-state logic
+                    bool prevMixed = false;
+                    bool newState = catSelected > 0;
+                    if (catSelected > 0 && catSelected < catVisible) { prevMixed = true; }
+                    EditorGUI.showMixedValue = prevMixed;
+                    bool toggled = EditorGUILayout.Toggle(newState, GUILayout.Width(16));
+                    EditorGUI.showMixedValue = false;
+                    if (toggled != newState || (prevMixed && toggled == newState))
+                    {
+                        // Toggle intera categoria: se era mixed o off -> on, se era on -> off
+                        bool target = !(catSelected == catVisible); // se tutti selezionati, deseleziona; altrimenti seleziona tutti
+                        for (int ci = 0; ci < cat.indices.Count; ci++)
+                        {
+                            var di = _diffInfos[cat.indices[ci]];
+                            if (_hideMeta && di.rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!string.IsNullOrEmpty(_filter) && !di.rel.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
+                            _selected[_fileIndex[di.rel]] = target;
+                        }
+                        catSelected = target ? catVisible : 0;
+                    }
+                    // Foldout
+                    cat.expanded = EditorGUILayout.Foldout(cat.expanded, $"{cat.name}  ({catSelected}/{catVisible})", true);
+                    GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
+                    if (cat.expanded)
+                    {
+                        // Disegna elementi
+                        for (int ci = 0; ci < cat.indices.Count; ci++)
+                        {
+                            var di = _diffInfos[cat.indices[ci]];
+                            if (_hideMeta && di.rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!string.IsNullOrEmpty(_filter) && !di.rel.Contains(_filter, StringComparison.OrdinalIgnoreCase)) continue;
+                            if (!_fileIndex.TryGetValue(di.rel, out int idx)) continue;
+                            EditorGUILayout.BeginHorizontal();
+                            _selected[idx] = EditorGUILayout.Toggle(_selected[idx], GUILayout.Width(16));
+                            using (new GuiColorScope(di.state == DiffState.New ? new Color(0.55f, 0.85f, 0.55f, 1f)
+                                : di.state == DiffState.Changed ? new Color(0.95f,0.85f,0.55f,1f)
+                                : di.state == DiffState.Same ? new Color(0.8f,0.8f,0.8f,0.8f)
+                                : GUI.color))
+                            {
+                                EditorGUILayout.LabelField(di.rel, GUILayout.ExpandWidth(true));
+                            }
+                            EditorGUILayout.LabelField(FormatSize(di.size), GUILayout.Width(70));
+                            EditorGUILayout.EndHorizontal();
+                        }
+                    }
                 }
                 EditorGUILayout.EndScrollView();
+                EditorGUILayout.LabelField($"Items: {totalVisible}    Selected: {totalSelectedVisible}", EditorStyles.miniLabel);
                 EditorGUILayout.EndVertical();
             }
             else
             {
-                // Easy summary (no list)
-                EditorGUILayout.Space(8);
+                // EASY MODE REDESIGN
+                GUILayout.Space(6);
                 int total = _diffInfos.Count;
                 int changed = _diffInfos.Count(d=>d.state==DiffState.Changed);
                 int news = _diffInfos.Count(d=>d.state==DiffState.New);
-                EditorGUILayout.LabelField($"Totale file: {total}   Nuovi: {news}   Modificati: {changed}", EditorStyles.miniLabel);
+                long sizeTotal = 0; foreach (var d in _diffInfos) sizeTotal += d.size;
+                long sizeNoMeta = 0; foreach (var d in _diffInfos) if (!d.rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)) sizeNoMeta += d.size;
+
+                EditorGUILayout.BeginVertical("box");
+                EditorGUILayout.LabelField("Version Summary", EditorStyles.boldLabel);
+                EditorGUILayout.Space(2);
+                // Stats row
+                EditorGUILayout.BeginHorizontal();
+                DrawBigStat("TOTAL", total.ToString(), new Color(0.75f,0.75f,0.75f,1f));
+                DrawBigStat("NEW", news.ToString(), news>0? new Color(0.40f,0.80f,0.45f,1f): new Color(0.28f,0.55f,0.30f,0.9f));
+                DrawBigStat("CHANGED", changed.ToString(), changed>0? new Color(0.95f,0.80f,0.35f,1f): new Color(0.65f,0.55f,0.25f,0.9f));
+                DrawBigStat("SAME", (total-news-changed).ToString(), new Color(0.55f,0.55f,0.55f,1f));
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                GUILayout.Space(6);
+                EditorGUILayout.LabelField($"Size (all): {FormatSize(sizeTotal)}    Size (no .meta): {FormatSize(sizeNoMeta)}", EditorStyles.miniLabel);
+                GUILayout.Space(4);
+                _backupBefore = EditorGUILayout.ToggleLeft(new GUIContent("Create pre-restore safety backup", "Copia l'attuale Assets/ in PreRestore/ prima di sovrascrivere"), _backupBefore);
+                GUILayout.Space(6);
+                GUILayout.BeginHorizontal(); GUILayout.FlexibleSpace();
+                GUIStyle bigBtn = new GUIStyle(GUI.skin.button){fontSize=14, fontStyle=FontStyle.Bold, fixedHeight=36, fixedWidth=200};
+                if (GUILayout.Button(new GUIContent("RESTORE ALL", "Ripristina tutti i file della versione"), bigBtn)) { SelectAllInternal(true); DoRestore(); }
+                GUILayout.FlexibleSpace(); GUILayout.EndHorizontal();
+                GUILayout.Space(4);
+                EditorGUILayout.HelpBox("Questo sovrascrive i file esistenti con quelli della versione selezionata.", MessageType.None);
+                if (_enumerationFallbackUsed)
+                {
+                    EditorGUILayout.HelpBox("Files enumerati in fallback (nessun prefisso Assets/ trovato). Potrebbe indicare layout anomalo della versione.", MessageType.Warning);
+                }
+                if (total == 0)
+                {
+                    EditorGUILayout.HelpBox("Nessun file rilevato in questa versione. Se è una vecchia versione legacy, potrebbe non contenere i dati copiati.", MessageType.Info);
+                }
+                EditorGUILayout.EndVertical();
+                GUILayout.FlexibleSpace(); // spinge il box in alto se si ridimensiona
             }
     
-            // Bottom bar
-            EditorGUILayout.Space(6);
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Cancel", GUILayout.Height(22), GUILayout.Width(90))) { Close(); }
-            GUILayout.FlexibleSpace();
-            if (!_advanced)
+            // Bottom bar (solo per Advanced; in Easy il pulsante grosso è nel box)
+            if (_advanced)
             {
-                if (GUILayout.Button(new GUIContent("Restore All", "Ripristina tutti i file della versione"), GUILayout.Height(24), GUILayout.Width(140))) { SelectAllInternal(true); DoRestore(); }
-            }
-            else
-            {
+                EditorGUILayout.Space(6);
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("Cancel", GUILayout.Height(22), GUILayout.Width(90))) { Close(); }
+                GUILayout.FlexibleSpace();
                 if (GUILayout.Button(new GUIContent("Restore Selected", "Ripristina solo i file selezionati"), GUILayout.Height(24), GUILayout.Width(160))) { DoRestore(); }
+                EditorGUILayout.EndHorizontal();
             }
-            EditorGUILayout.EndHorizontal();
+
+            // Shortcuts: Invio = restore (context aware), Esc = cancel
+            if (Event.current.type == EventType.KeyDown)
+            {
+                if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                { if (_advanced) DoRestore(); else { SelectAllInternal(true); DoRestore(); } Event.current.Use(); }
+                else if (Event.current.keyCode == KeyCode.Escape) { Close(); Event.current.Use(); }
+            }
         }
     
         void DoRestore()
@@ -306,6 +447,18 @@ namespace AvatarSmartBackup
             Color _prev;
             public GuiColorScope(Color c) { _prev = GUI.color; GUI.color = c; }
             public void Dispose() { GUI.color = _prev; }
+        }
+
+        void DrawBigStat(string label, string value, Color col)
+        {
+            var prev = GUI.color; GUI.color = col;
+            GUILayout.BeginVertical("box", GUILayout.Width(90));
+            var labStyle = new GUIStyle(EditorStyles.miniBoldLabel){alignment=TextAnchor.MiddleCenter};
+            var valStyle = new GUIStyle(EditorStyles.label){alignment=TextAnchor.MiddleCenter, fontSize=16, fontStyle=FontStyle.Bold};
+            GUILayout.Label(label, labStyle);
+            GUILayout.Label(value, valStyle);
+            GUILayout.EndVertical();
+            GUI.color = prev;
         }
     }
 }
