@@ -10,7 +10,7 @@ namespace AvatarSmartBackup
     public static class SystemDiagnostics
     {
         // Only show debug menu items when debug mode is enabled
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Test Versioning (File-Based)", false, 900)]
+    [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Test Versioning (File-Based)", false, 900)]
         public static void TestFileVersioning()
         {
             var settings = BackupManager.LoadSettings();
@@ -20,7 +20,7 @@ namespace AvatarSmartBackup
                     "Debug tests are only available when Debug Mode is enabled in Advanced Settings.", "OK");
                 return;
             }
-
+ 
             try
             {
                 // FileBasedVersionManager nel namespace AvatarSmartBackup
@@ -44,7 +44,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Show System Info", false, 901)]
+    [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Show System Info", false, 901)]
         public static void ShowSystemInfo()
         {
             var settings = BackupManager.LoadSettings();
@@ -66,8 +66,8 @@ namespace AvatarSmartBackup
             Debug.Log($"System Info:\n{info}");
         }
         // Validate menu items only show in debug mode
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Test Versioning (File-Based)", true)]
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Show System Info", true)]
+    [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Test Versioning (File-Based)", true)]
+    [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Show System Info", true)]
         public static bool ValidateDebugMenus()
         {
             var settings = BackupManager.LoadSettings();

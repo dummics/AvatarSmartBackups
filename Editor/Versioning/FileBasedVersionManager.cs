@@ -277,6 +277,41 @@ namespace AvatarSmartBackup
             }
         }
 
+        /// <summary>
+        /// Delete a version (fails silently if pinned). Returns true if removed from index.
+        /// </summary>
+        public bool DeleteVersion(int id)
+        {
+            try
+            {
+                var index = LoadIndex();
+                var v = index.versions.FirstOrDefault(x => x.id == id);
+                if (v == null) return false;
+                if (v.pinned)
+                {
+                    Debug.LogWarning($"[ASB] Refusing to delete pinned/favorite version #{id}");
+                    return false;
+                }
+                index.versions.Remove(v);
+                SaveIndex(index);
+                string versionDir = Path.Combine(_versionsRoot, $"v{id:D3}");
+                try
+                {
+                    if (Directory.Exists(versionDir)) Directory.Delete(versionDir, true);
+                }
+                catch (Exception exDir)
+                {
+                    Debug.LogWarning($"[ASB] Deleted index entry but failed to remove directory {versionDir}: {exDir.Message}");
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ASB] Failed to delete version {id}: {ex.Message}");
+                return false;
+            }
+        }
+
         public void Dispose()
         {
             if (_disposed) return;

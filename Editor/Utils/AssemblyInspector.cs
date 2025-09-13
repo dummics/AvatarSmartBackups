@@ -2,12 +2,13 @@
 using UnityEditor;
 using UnityEngine;
 using System.Linq;
+using System;
 
 namespace AvatarSmartBackup.Debugging
 {
     public static class AssemblyInspector
     {
-        [MenuItem("Tools/Avatar Smart Backup/Debug Tests/Test File-Based Version Manager")] 
+    [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Test File-Based Version Manager")] 
         public static void TestFileBasedVersionManager()
         {
             try

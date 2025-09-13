@@ -15,7 +15,7 @@ namespace AvatarSmartBackup
         private bool _isLoading = true;
         private string _errorMessage = null;
 
-        [MenuItem("Tools/Avatar Smart Backup/Versions")]
+        // [MenuItem("Tools/Avatar Smart Backup/Versions")]
         public static void Open()
         {
             var window = GetWindow<VersionHistoryWindow>(true, "Backup Versions");
