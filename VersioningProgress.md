@@ -1,38 +1,44 @@
-# Versioning Progress (concise)
+# Versioning Progress (short)
 
-Schema & Storage:
-- [x] File-based versions folder structure (Versions/vNNN, versions.json index)
-- [x] Extended VersionInfo (guid, size, fileCount, pinned, incomplete, toolVersion, description)
-- [x] Migration + schemaVersion guard, atomic save (.tmp -> replace)
+Core Done:
+- File-based versions + atomic index
+- Extended metadata (guid, size, fileCount, pinned, incomplete)
+- Auto create version after backup
+- Pin / Rename / Integrity basic checks
+- Unified window + diff + selective restore (grouping, filters)
+- MD5 manifest compare (detect Changed when size same)
 
-Core API:
-- [x] CreateVersion auto after backup
-- [x] List/Get, size+fileCount calc
-- [x] Pin / Unpin, Rename (description update)
-- [x] Incomplete lifecycle flag (cleared on finalize)
+Pending UI / Features:
+- Delete version from UI
+- Export / Import version (zip)
+- Expose cleanup policy (respect pinned)
 
-UI Integration:
-- [x] Single main window tabs (Backup, Versions)
-- [x] Versions tab: list, pin/unpin, rename, open folder, manual create (gated by changes)
-- [x] (Replaced) Highlight latest → now inline selectable cards (no reorder) with in-place Restore button
-- [x] Latest version summary shown in Backup tab
-- [x] Manual snapshot & benchmark only visible in Debug mode
-- [x] Backup Now button gated (debug only)
-- [x] Centered large Automatic Backups toggle + cleaner interval UI
-- [x] Restore action consolidated (Preview & Restore) per card; latest just another selectable entry
-- [x] Removed legacy standalone versions button
-- [x] Menu cleanup: spostati test in "Avatar Smart Backup Debug" e aggiunta voce "Open"
-- [x] In-place selection via click sul box (background highlight); ordine lista preservato
-- [ ] Future: diff view, selective restore UI, delete/export, pinned-aware cleanup settings
+Performance Roadmap:
+1. HashCache in restore (enable) + optional xxHash64
+2. Remove full Assets enumeration in diff
+3. Idle parallel hash precompute
+4. (If needed) UI virtualization >5k files
 
-Next Focus (ordered):
-1. Restore service (safe snapshot + bulk restore)
-2. Diff service (basic changed/new/deleted detection) + UI
-3. Cleanup policy (respect pinned + max count setting)
-4. Diagnostics (rebuild index, verify folders)
-5. Optional hash/cached integrity (deferred)
+Dedup Roadmap (Git-lite):
+- Phase 0 DONE: full copies
+- Phase 1: Optional object store (`Objects/`) for large files (flag)
+- Phase 2: Retroactive dedupe job
+- Phase 3: Delta (maybe) for large text/YAML (low priority)
+- Phase 4: GC unused objects
 
-Notes:
-- Legacy 1.0.4 window archived in worktree, used for layout parity.
-- Snapshot policy now adds Manual option gating button enable state.
- - Root menu poteva risultare categoria a causa dei sotto-menu; aggiunta entry "Open" per robustezza.
+Design Notes:
+- Linear versions only (no branches)
+- Hash preference: xxHash64 (speed) + keep MD5 for legacy
+- Reference format draft: stub file `ASB_REF:<hash>`
+
+Diagnostics (planned):
+- Rebuild index button
+- Hash store scan + GC
+- Log viewer shortcut
+
+Next Immediate Steps:
+1. Re-enable HashCache in restore
+2. Add cleanup policy UI
+3. Introduce experimental dedup flag
+
+Status: Performance step 1 in progress.

@@ -545,19 +545,17 @@ namespace AvatarSmartBackup
                 }
             }
             // Log pruning activity in debug mode
-            if (newMan != null && newMan.entries != null && newMan.entries.Count >= 0)
+            // Debug log solo sul main thread per evitare EditorPrefs/Json in background
+            MainThread.Invoke(() =>
             {
-                // If debug mode is enabled in settings, try to read it and log
                 try
                 {
                     var s = LoadSettings();
                     if (s?.debugMode == true)
-                    {
                         Log.Info($"PruneRemoved: pruned files={pruned}");
-                    }
                 }
                 catch { }
-            }
+            });
         }
         public static string MakeRelTo(string p, string root)
         {
@@ -566,7 +564,7 @@ namespace AvatarSmartBackup
             return Uri.UnescapeDataString(ru.MakeRelativeUri(pu).ToString()).Replace('/', Path.DirectorySeparatorChar);
         }
 
-        public static int EffectiveCopyMBps(BackupSettings s)
+        public static int EffectiveCopyMBps(BackupSettings s) 
         {
             if (s.autoThrottle && s.lastMeasuredMBps > 0f)
             {
@@ -624,13 +622,17 @@ namespace AvatarSmartBackup
                 float mbps = await RunBenchmarkAsync();
                 if (mbps > 0f)
                 {
-                    s.lastMeasuredMBps = mbps;
-                    s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
-                    SaveSettings(s);
-                    TimerService.InvalidateSettingsCache();
-                    Log.Info($"Disk throughput benchmark: {mbps:0.0} MB/s");
+                    // Mutazioni ed Editor API sul main thread
+                    MainThread.Invoke(() =>
+                    {
+                        s.lastMeasuredMBps = mbps;
+                        s.lastBenchmarkTicks = DateTime.UtcNow.Ticks;
+                        SaveSettings(s);
+                        TimerService.InvalidateSettingsCache();
+                        Log.Info($"Disk throughput benchmark: {mbps:0.0} MB/s");
+                    });
                 }
-                try { UnityEditor.SessionState.SetBool(SessionKey, true); } catch { }
+                MainThread.Invoke(() => { try { UnityEditor.SessionState.SetBool(SessionKey, true); } catch { } });
             }
             finally { _benchBusy = 0; }
         }
@@ -683,7 +685,9 @@ namespace AvatarSmartBackup
             {
                 try
                 {
-                    string dir = Path.Combine(Path.GetTempPath(), "ASB_Bench");
+                    // Usa path unico per run per evitare sharing violation se benchmark paralleli o precedente non pulito
+                    string baseDir = Path.Combine(Path.GetTempPath(), "ASB_Bench");
+                    string dir = Path.Combine(baseDir, Guid.NewGuid().ToString("N"));
                     Directory.CreateDirectory(dir);
                     string a = Path.Combine(dir, "a.tmp");
                     int sizeMB = 64; // Larger test for more realistic sustained performance
@@ -738,7 +742,7 @@ namespace AvatarSmartBackup
                         double readMB = readBytes / (1024.0 * 1024.0);
                         double readMbps = readMB / readSec;
 
-                        try { File.Delete(a); Directory.Delete(dir); } catch { }
+                        try { if (File.Exists(a)) File.Delete(a); Directory.Delete(dir, true); } catch { }
 
                         // Conservative result calculation for reliability
                         if (writtenMB <= 1.0 || readMB <= 1.0) return 0f; // Need meaningful test size

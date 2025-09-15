@@ -18,7 +18,7 @@ namespace AvatarSmartBackup
         
         public enum Level
         {
-            Debug = 0,
+            Debug = 0, 
             Info = 1, 
             Warn = 2,
             Error = 3
@@ -78,7 +78,8 @@ namespace AvatarSmartBackup
 
         static bool ShouldLogToFile(Level level)
         {
-            var settings = BackupManager.LoadSettings();
+            // Evita chiamate dirette a EditorPrefs da thread secondari
+            var settings = SafeGetSettings();
             
             // Always log Warn and Error to file
             if (level >= Level.Warn) return true;
@@ -116,7 +117,7 @@ namespace AvatarSmartBackup
                 WriteToFile(Level.Debug, detailedMsg);
             
             // Only show in console if debug mode is enabled
-            var settings = BackupManager.LoadSettings();
+            var settings = SafeGetSettings();
             if (settings.debugMode && !string.IsNullOrEmpty(consoleMsg))
                 LogToConsole(Level.Debug, consoleMsg);
         }
@@ -150,6 +151,33 @@ namespace AvatarSmartBackup
         // Utility methods
         public static string GetLogDirectory() => LogDir;
         public static string GetCurrentLogFile() => CurrentLogFile;
+
+        // Thread-safe cached access alle settings per logging
+        static BackupSettings _cachedSettings;
+        static DateTime _lastSettingsFetch;
+        static readonly TimeSpan SettingsCacheLifetime = TimeSpan.FromSeconds(5);
+        static readonly object _settingsLock = new object();
+
+        static BackupSettings SafeGetSettings()
+        {
+            try
+            {
+                lock (_settingsLock)
+                {
+                    if (_cachedSettings != null && (DateTime.UtcNow - _lastSettingsFetch) < SettingsCacheLifetime)
+                        return _cachedSettings;
+                }
+                // Eseguiamo la fetch sul main thread per sicurezza
+                var s = MainThread.InvokeBlocking(() => BackupManager.LoadSettings());
+                lock (_settingsLock)
+                {
+                    _cachedSettings = s;
+                    _lastSettingsFetch = DateTime.UtcNow;
+                }
+                return s;
+            }
+            catch { return new BackupSettings(); }
+        }
     }
 }
 #endif

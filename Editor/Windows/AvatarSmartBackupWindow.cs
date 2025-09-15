@@ -36,6 +36,7 @@ namespace AvatarSmartBackup
     int _selectedVersionId = -1; // selected version id (default latest)
     // Doppio click tracking per apertura rapida preview
     int _lastClickId = -1; double _lastClickTime = -1;
+    double _lastManualRunTime = -1; // throttle manual backup
     // Textures (Resources)
     static Texture2D _texExplorer; static bool _texTried;
     void EnsureTextures()
@@ -87,7 +88,7 @@ namespace AvatarSmartBackup
     void DrawBackupTab()
     {
         EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox("Automatic safety copies in the background. Keeps Unity responsive. Creates compressed snapshots only when it’s helpful.", MessageType.Info);
+    EditorGUILayout.HelpBox("Automatic safety copies in background. Usa 'Backup Now' per forzare (throttle applicato).", MessageType.Info);
 
         // Control block
         EditorGUILayout.BeginVertical("box");
@@ -138,24 +139,35 @@ namespace AvatarSmartBackup
             // Actions (simplified – manual operations mostly in debug)
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Manual / Tools", EditorStyles.boldLabel);
-            using (new EditorGUI.DisabledScope(!_settings.debugMode))
+            const double BackupManualCooldownSeconds = 30; // min intervallo manuale
+            if (!_settings.debugMode)
             {
-                GUIContent backupNowGc = new GUIContent("Backup Now", _settings.debugMode ? "Force a backup immediately" : "Enable Debug Mode to use manual backup");
-                if (GUILayout.Button(backupNowGc))
+                // In modalità normale mostriamo sempre il pulsante ma con throttle
+                bool canManual = true;
+                string tooltip = "Esegui subito un backup (cooldown 30s)";
+                double now = EditorApplication.timeSinceStartup;
+                if (_lastManualRunTime > 0 && now - _lastManualRunTime < BackupManualCooldownSeconds)
                 {
-                    if (_settings.debugMode)
+                    canManual = false;
+                    double rem = BackupManualCooldownSeconds - (now - _lastManualRunTime);
+                    tooltip = $"Attendi {rem:0}s prima di un altro backup manuale";
+                }
+                using (new EditorGUI.DisabledScope(!canManual || BackupManager.IsBusy))
+                {
+                    if (GUILayout.Button(new GUIContent("Backup Now", tooltip)))
+                    {
+                        _lastManualRunTime = now;
                         BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
+                    }
                 }
             }
-            // Snapshot feature hidden if non-debug (still functional internally). Only show button when debug+Manual policy.
-            if (_settings.debugMode)
+            else
             {
-                bool isManualPolicy = _settings.zipPolicy == ZipPolicy.Manual;
-                bool canCreateSnapshot = isManualPolicy && !BackupManager.IsBusy;
-                using (new EditorGUI.DisabledScope(!canCreateSnapshot))
+                // In debug nessun throttle (si può usare per test performance)
+                using (new EditorGUI.DisabledScope(BackupManager.IsBusy))
                 {
-                    if (GUILayout.Button(new GUIContent("Create Snapshot Now", "Manual compressed snapshot (debug / maintenance)")))
-                        _ = SnapshotCreator.RunManualSnapshotAsync(_settings);
+                    if (GUILayout.Button(new GUIContent("Backup Now", "Force a backup immediately (debug mode)")))
+                        BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
                 }
             }
             // Last version quick summary + button to switch to Versions tab
@@ -198,18 +210,21 @@ namespace AvatarSmartBackup
         // Toolbar line
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button(new GUIContent("Refresh", "Reload versions from disk"), GUILayout.Width(70))) _cachedVersions = null;
-        GUI.enabled = !BackupManager.IsBusy;
-        bool allowManualVersion = CanCreateManualVersion(out string reasonBlock);
-        using (new EditorGUI.DisabledScope(!allowManualVersion))
+        if (_settings.debugMode)
         {
-            if (GUILayout.Button(new GUIContent("Create Version", allowManualVersion ? "Create a manual restore point" : reasonBlock), GUILayout.Width(110)))
+            GUI.enabled = !BackupManager.IsBusy;
+            bool allowManualVersion = CanCreateManualVersion(out string reasonBlock);
+            using (new EditorGUI.DisabledScope(!allowManualVersion))
             {
-                using var vm = new FileBasedVersionManager();
-                vm.CreateVersion("Manual", Path.Combine(FileUtilEx.BackupRoot, "Current"));
-                _cachedVersions = null; EnsureVersionsCache();
+                if (GUILayout.Button(new GUIContent("Create Version", allowManualVersion ? "Create a manual restore point" : reasonBlock), GUILayout.Width(110)))
+                {
+                    using var vm = new FileBasedVersionManager();
+                    vm.CreateVersion("Manual", Path.Combine(FileUtilEx.BackupRoot, "Current"));
+                    _cachedVersions = null; EnsureVersionsCache();
+                }
             }
+            GUI.enabled = true;
         }
-        GUI.enabled = true;
         GUILayout.FlexibleSpace();
         EditorGUILayout.EndHorizontal();
 
