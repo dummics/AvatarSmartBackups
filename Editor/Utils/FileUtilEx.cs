@@ -18,30 +18,42 @@ namespace AvatarSmartBackup
 
         public static string MD5Of(string file)
         {
-            using var md5 = MD5.Create();
+            return ComputeHash(MD5.Create(), file);
+        }
+
+        public static string SHA256Of(string file)
+        {
+            return ComputeHash(SHA256.Create(), file);
+        }
+
+        static string ComputeHash(HashAlgorithm algorithm, string file)
+        {
+            using (algorithm)
             using var stream = File.OpenRead(file);
-            
-            // For large files, use buffered reading with periodic yields to prevent UI freezing
-            var buffer = new byte[64 * 1024]; // 64KB buffer
+
+            var buffer = new byte[64 * 1024];
             long totalRead = 0;
             int bytesRead;
-            
+
             while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
             {
-                md5.TransformBlock(buffer, 0, bytesRead, null, 0);
+                algorithm.TransformBlock(buffer, 0, bytesRead, null, 0);
                 totalRead += bytesRead;
-                
-                // Yield control back to main thread every 1MB to prevent UI freeze
+
                 if (totalRead % (1024 * 1024) == 0)
-                {
                     System.Threading.Thread.Yield();
-                }
             }
-            
-            md5.TransformFinalBlock(buffer, 0, 0);
-            var hash = md5.Hash;
+
+            algorithm.TransformFinalBlock(buffer, 0, 0);
+            return BytesToHex(algorithm.Hash);
+        }
+
+        static string BytesToHex(byte[] hash)
+        {
+            if (hash == null || hash.Length == 0) return string.Empty;
             var sb = new StringBuilder(hash.Length * 2);
-            foreach (var b in hash) sb.Append(b.ToString("x2"));
+            foreach (var b in hash)
+                sb.Append(b.ToString("x2"));
             return sb.ToString();
         }
 
@@ -77,4 +89,5 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+
 

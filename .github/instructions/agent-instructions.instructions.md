@@ -17,4 +17,5 @@ When responding, the AI should:
 - Keep answers tied to the actual context — avoid generic textbook-style replies.
 - Ask if something isn’t clear instead of guessing.
 - Always update the `refactor-docs` folder with relevant changes and tell the user.
+- Don't propose changes that are too complex or out of scope for the current codebase, avoid enterprise code patterns.
 - ⚠️ Stay focused: don’t propose extra refactors or new changes mid-task unless the user asks.

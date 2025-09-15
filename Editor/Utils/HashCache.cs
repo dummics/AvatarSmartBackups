@@ -7,55 +7,91 @@ using UnityEngine;
 namespace AvatarSmartBackup
 {
     /// <summary>
-    /// Runtime-only cache per hash MD5 dei file del progetto per ridurre letture ripetute.
-    /// Non viene serializzato; invalidazione basata su size + lastWriteUtc.
+    /// Runtime cache for file hashes to reduce repeated disk reads.
+    /// Entries are keyed by absolute path with size/mtime guards.
     /// </summary>
     internal static class HashCache
     {
-        class Entry { public long size; public long ticks; public string md5; }
+        class Entry
+        {
+            public long size;
+            public long ticks;
+            public string md5;
+            public string sha256;
+        }
+
         static readonly Dictionary<string, Entry> _cache = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         static readonly object _lock = new object();
         static int _hits, _misses;
 
         public static string GetOrCompute(string absPath)
         {
+            return GetOrCompute(absPath, HashKind.MD5);
+        }
+
+        public static string GetOrCompute(string absPath, HashKind kind)
+        {
             try
             {
                 var fi = new FileInfo(absPath);
                 long size = fi.Length;
                 long ticks = fi.LastWriteTimeUtc.Ticks;
+
                 lock (_lock)
                 {
-                    if (_cache.TryGetValue(absPath, out var e))
+                    if (_cache.TryGetValue(absPath, out var cached))
                     {
-                        if (e.size == size && e.ticks == ticks && !string.IsNullOrEmpty(e.md5)) { _hits++; return e.md5; }
+                        if (cached.size == size && cached.ticks == ticks)
+                        {
+                            string val = kind == HashKind.MD5 ? cached.md5 : cached.sha256;
+                            if (!string.IsNullOrEmpty(val))
+                            {
+                                _hits++;
+                                return val;
+                            }
+                        }
                     }
                 }
-                // compute fuori lock per non bloccare
-                string md5 = FileUtilEx.MD5Of(absPath);
+
+                string hash = kind == HashKind.MD5 ? FileUtilEx.MD5Of(absPath) : FileUtilEx.SHA256Of(absPath);
+
                 lock (_lock)
                 {
-                    _cache[absPath] = new Entry { size = size, ticks = ticks, md5 = md5 };
+                    if (!_cache.TryGetValue(absPath, out var entry))
+                    {
+                        entry = new Entry();
+                        _cache[absPath] = entry;
+                    }
+
+                    entry.size = size;
+                    entry.ticks = ticks;
+                    if (kind == HashKind.MD5) entry.md5 = hash; else entry.sha256 = hash;
                     _misses++;
                 }
-                return md5;
+
+                return hash;
             }
             catch (Exception ex)
             {
-                Log.Warn("HashCache: compute fallita per "+absPath+": "+ex.Message);
+                Log.Warn("HashCache: compute fallita per " + absPath + ": " + ex.Message);
                 return string.Empty;
             }
         }
 
-        public static (int hits,int misses,int entries) Stats()
+        public static (int hits, int misses, int entries) Stats()
         {
-            lock (_lock) return (_hits,_misses,_cache.Count);
+            lock (_lock) return (_hits, _misses, _cache.Count);
         }
 
         public static void Clear()
         {
-            lock (_lock) { _cache.Clear(); _hits=_misses=0; }
+            lock (_lock)
+            {
+                _cache.Clear();
+                _hits = _misses = 0;
+            }
         }
     }
 }
 #endif
+
