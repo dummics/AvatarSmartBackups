@@ -31,6 +31,9 @@ namespace AvatarSmartBackup
         public List<string> includeFolders = new List<string>() { "Assets/" };
         public List<string> excludeFolders = new List<string>() { "Assets/StreamingAssets", "Packages" };
 
+        public List<string> trackedRoots = new List<string>();
+        public bool selectionLocked = false;
+
         // ZIP / PERFORMANCE
         public ZipPolicy zipPolicy = ZipPolicy.OnChange;
         public int idleDelaySeconds = 10;             // Seconds of inactivity before zipping when Idle policy

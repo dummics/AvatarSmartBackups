@@ -136,13 +136,13 @@ namespace AvatarSmartBackup
             }
             EditorGUILayout.EndVertical();
 
-            // Actions (simplified – manual operations mostly in debug)
+            // Actions (simplified ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ manual operations mostly in debug)
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Manual / Tools", EditorStyles.boldLabel);
             const double BackupManualCooldownSeconds = 30; // min intervallo manuale
             if (!_settings.debugMode)
             {
-                // In modalità normale mostriamo sempre il pulsante ma con throttle
+                // In modalitÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  normale mostriamo sempre il pulsante ma con throttle
                 bool canManual = true;
                 string tooltip = "Esegui subito un backup (cooldown 30s)";
                 double now = EditorApplication.timeSinceStartup;
@@ -163,7 +163,7 @@ namespace AvatarSmartBackup
             }
             else
             {
-                // In debug nessun throttle (si può usare per test performance)
+                // In debug nessun throttle (si puÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â² usare per test performance)
                 using (new EditorGUI.DisabledScope(BackupManager.IsBusy))
                 {
                     if (GUILayout.Button(new GUIContent("Backup Now", "Force a backup immediately (debug mode)")))
@@ -251,18 +251,18 @@ namespace AvatarSmartBackup
             // Begin card content
             EditorGUILayout.BeginVertical(GUI.skin.box);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent(v.pinned ? "★" : "☆", v.pinned ? "Rimuovi dai preferiti" : "Mantieni (non eliminare)"), GUILayout.Width(24))) pendingTogglePin = v.id;
-            Rect starRect = GUILayoutUtility.GetLastRect(); // valido: c'è appena stato un controllo disegnato
+            if (GUILayout.Button(new GUIContent(v.pinned ? "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦" : "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ", v.pinned ? "Rimuovi dai preferiti" : "Mantieni (non eliminare)"), GUILayout.Width(24))) pendingTogglePin = v.id;
+            Rect starRect = GUILayoutUtility.GetLastRect(); // valido: c'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ appena stato un controllo disegnato
             string title = $"#{v.id}  {(string.IsNullOrEmpty(v.description) ? "(no description)" : v.description)}";
             if (v.incomplete) title += "  (writing...)";
-            if (latest!=null && latest.id==v.id) title = "Latest • " + title;
+            if (latest!=null && latest.id==v.id) title = "Latest ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ " + title;
             EditorGUILayout.LabelField(title, isSelected ? _selectedTitleStyle : EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             Rect folderBtnRect = GUILayoutUtility.GetRect(20, 18, GUILayout.Width(20));
             if (_texExplorer != null && Event.current.type == EventType.Repaint)
                 GUI.DrawTexture(folderBtnRect, _texExplorer, ScaleMode.ScaleToFit, true);
             else if (Event.current.type == EventType.Repaint && _texExplorer == null)
-            { var style = EditorStyles.miniLabel; var pc = GUI.color; GUI.color = new Color(1,1,1,0.35f); GUI.Label(folderBtnRect, "📂", style); GUI.color = pc; }
+            { var style = EditorStyles.miniLabel; var pc = GUI.color; GUI.color = new Color(1,1,1,0.35f); GUI.Label(folderBtnRect, "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡", style); GUI.color = pc; }
             if (GUI.Button(folderBtnRect, GUIContent.none, GUIStyle.none)) { string dir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{v.id:D3}"); if (Directory.Exists(dir)) EditorUtility.RevealInFinder(dir); else EditorUtility.DisplayDialog("Version", "Folder not found", "OK"); }
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.LabelField($"Created: {v.timestamp.ToLocalTime():yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
@@ -355,7 +355,7 @@ namespace AvatarSmartBackup
         if (Event.current.type == EventType.Repaint)
         {
             // Ridisegniamo tutte le card di nuovo? No: semplice approccio futuro -> TODO: convertire in IMGUIContainer overlay.
-            // Per semplicità attuale: niente overlay multi pass; mantenere comportamento precedente (rimosso slot).
+            // Per semplicitÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  attuale: niente overlay multi pass; mantenere comportamento precedente (rimosso slot).
             // (Se serve davvero overlay fisso, reintrodurremo slot ma con contenuto invisibile invece di vuoto.)
         }
     }
@@ -444,7 +444,7 @@ namespace AvatarSmartBackup
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Snapshot (Zip) Policy", EditorStyles.boldLabel);
-            if (GUILayout.Button(new GUIContent("?", "Legacy snapshot system – mainly for compressed archives."), GUILayout.Width(22)))
+            if (GUILayout.Button(new GUIContent("?", "Legacy snapshot system ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ mainly for compressed archives."), GUILayout.Width(22)))
             {
                 EditorUtility.DisplayDialog("Snapshot Policy", "Snapshots are compressed .zip archives of the backup set. Regular users can rely on Versions instead.", "OK");
             }
@@ -467,7 +467,7 @@ namespace AvatarSmartBackup
         _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
         if (_settings.debugMode && _settings.lastMeasuredMBps > 0f)
             EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
-        // Benchmark button only in debug (moved below) – keeps UI simpler
+        // Benchmark button only in debug (moved below) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ keeps UI simpler
         EditorGUILayout.EndVertical();
 
         // WHAT TO INCLUDE
@@ -528,6 +528,7 @@ namespace AvatarSmartBackup
         DrawIncludeExcludeSection("Include", _settings.includeFolders, ref _newIncludePattern, ref _includePrefix, ref _includeFolderObj);
         EditorGUILayout.Space(6);
         DrawIncludeExcludeSection("Exclude", _settings.excludeFolders, ref _newExcludePattern, ref _excludePrefix, ref _excludeFolderObj);
+        DrawTrackedSelectionSection();
         EditorGUILayout.EndVertical();
 
         // DEBUG (only when debug mode enabled toggle lives here)
@@ -567,6 +568,121 @@ namespace AvatarSmartBackup
     }
     
     
+        void DrawTrackedSelectionSection()
+        {
+            if (_settings.trackedRoots == null) _settings.trackedRoots = new List<string>();
+            var tracked = _settings.trackedRoots;
+            bool frozen = BackupManager.IsSelectionFrozen(_settings);
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Tracked Selection", EditorStyles.boldLabel);
+
+            if (tracked.Count == 0)
+            {
+                EditorGUILayout.LabelField("Tracking all assets allowed by filters.", EditorStyles.miniLabel);
+            }
+            else
+            {
+                int removeIndex = -1;
+                for (int i = 0; i < tracked.Count; i++)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField(tracked[i], GUILayout.ExpandWidth(true));
+                    if (GUILayout.Button("Remove", GUILayout.Width(70))) removeIndex = i;
+                    EditorGUILayout.EndHorizontal();
+                }
+                if (removeIndex >= 0)
+                {
+                    var updated = new List<string>(tracked);
+                    updated.RemoveAt(removeIndex);
+                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
+                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
+                    _settings = BackupManager.LoadSettings();
+                    TimerService.InvalidateSettingsCache();
+                    EditorGUILayout.EndVertical();
+                    return;
+                }
+            }
+
+            string folderToAdd = null;
+            string fileToAdd = null;
+
+            EditorGUILayout.Space(4);
+            using (new EditorGUI.DisabledScope(frozen))
+            {
+                EditorGUILayout.BeginHorizontal();
+                if (GUILayout.Button("Add Folder...", GUILayout.Width(110)))
+                {
+                    folderToAdd = EditorUtility.OpenFolderPanel("Select folder", FileUtilEx.ProjectRoot, string.Empty);
+                }
+                if (GUILayout.Button("Add File...", GUILayout.Width(110)))
+                {
+                    fileToAdd = EditorUtility.OpenFilePanel("Select asset", FileUtilEx.ProjectRoot, "*");
+                }
+                EditorGUILayout.EndHorizontal();
+
+                if (!_settings.selectionLocked && GUILayout.Button("Lock Selection"))
+                {
+                    if (!BackupManager.TryUpdateTrackedSelection(_settings.trackedRoots, true, out var err))
+                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to lock selection.", "OK");
+                    _settings = BackupManager.LoadSettings();
+                    TimerService.InvalidateSettingsCache();
+                    EditorGUILayout.EndVertical();
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(folderToAdd))
+            {
+                string rel = FileUtilEx.MakeRelToProject(folderToAdd).Replace("\\", "/");
+                if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                {
+                    EditorUtility.DisplayDialog("Tracked Selection", "Please choose a folder inside the Assets directory.", "OK");
+                }
+                else
+                {
+                    if (!rel.EndsWith("/")) rel += "/";
+                    var updated = new List<string>(_settings.trackedRoots ?? new List<string>()) { rel };
+                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
+                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
+                    _settings = BackupManager.LoadSettings();
+                    TimerService.InvalidateSettingsCache();
+                    EditorGUILayout.EndVertical();
+                    return;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(fileToAdd))
+            {
+                string rel = FileUtilEx.MakeRelToProject(fileToAdd).Replace("\\", "/");
+                if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
+                {
+                    EditorUtility.DisplayDialog("Tracked Selection", "Please choose a file inside the Assets directory.", "OK");
+                }
+                else if (rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    EditorUtility.DisplayDialog("Tracked Selection", "Script files (.cs) are excluded from backups.", "OK");
+                }
+                else
+                {
+                    var updated = new List<string>(_settings.trackedRoots ?? new List<string>()) { rel };
+                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
+                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
+                    _settings = BackupManager.LoadSettings();
+                    TimerService.InvalidateSettingsCache();
+                    EditorGUILayout.EndVertical();
+                    return;
+                }
+            }
+
+            if (frozen)
+            {
+                EditorGUILayout.HelpBox("Selection locked. Remove entries to narrow scope. Reset settings to change additions.", MessageType.Info);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
         static void DrawStringListVertical(List<string> list, string addLabel)
         {
             int remove = -1;
@@ -688,7 +804,7 @@ namespace AvatarSmartBackup
                 if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue;
                 string dst = Path.Combine(FileUtilEx.ProjectRoot, rel);
                 try { Directory.CreateDirectory(Path.GetDirectoryName(dst)); File.Copy(src, dst, true); }
-                catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " – " + ex.Message); }
+                catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ " + ex.Message); }
             }
             MainThread.Invoke(() => AssetDatabase.Refresh());
             EditorUtility.DisplayDialog("Restore", "Restore completato.", "OK");

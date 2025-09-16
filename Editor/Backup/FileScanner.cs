@@ -56,6 +56,7 @@ namespace AvatarSmartBackup
             bool limitExtsToFolders = settings.extWithinIncludeFolders && includeFolders.Count > 0;
             long materialsMaxBytes = Math.Max(10, settings.materialsMaxKB) * 1024L;
             long dllMaxBytes = Math.Max(128, settings.dllsMaxKB) * 1024L;
+            var selectionRules = SelectionFilter.BuildRules(settings);
 
             var dirty = NormalizeDirtyPaths(dirtyPaths, assetsRoot);
             if (dirty.Count > 0)
@@ -81,13 +82,13 @@ namespace AvatarSmartBackup
                 if (string.IsNullOrEmpty(absPath)) return;
                 if (!File.Exists(absPath)) return;
 
-                string rel = FileUtilEx.MakeRelToProject(absPath).Replace("\\", "/");
+                string rel = FileUtilEx.MakeRelToProject(absPath).Replace("\", "/");
                 if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) return;
+                if (!SelectionFilter.Allows(selectionRules, rel)) return;
                 if (!CollectHelpers.PassesFolderFilters(rel, settings)) return;
 
                 string ext = Path.GetExtension(rel);
-                if (string.Equals(ext, ".meta", StringComparison.OrdinalIgnoreCase)) return;
-                if (HeavySkipSet.Contains(ext)) return;
+                if (IsDisallowedExtension(ext)) return;
 
                 var info = new FileInfo(absPath);
                 if (!allowAny && !MatchesCategory(rel, ext, info, settings, materialsMaxBytes, dllMaxBytes, extensionPatterns, includeFolders, limitExtsToFolders))
@@ -101,9 +102,18 @@ namespace AvatarSmartBackup
             }
         }
 
+        internal static bool IsDisallowedExtension(string ext)
+        {
+            if (string.IsNullOrEmpty(ext)) return false;
+            if (string.Equals(ext, ".meta", StringComparison.OrdinalIgnoreCase)) return false;
+            if (string.Equals(ext, ".cs", StringComparison.OrdinalIgnoreCase)) return true;
+            return HeavySkipSet.Contains(ext);
+        }
+
         static bool MatchesCategory(string rel, string ext, FileInfo info, BackupSettings settings, long materialsMaxBytes, long dllMaxBytes, HashSet<string> extensionPatterns, List<string> includeFolders, bool limitExtsToFolders)
         {
             if (string.IsNullOrEmpty(ext)) return false;
+            if (string.Equals(ext, ".cs", StringComparison.OrdinalIgnoreCase)) return false;
 
             if (ext.Equals(".anim", StringComparison.OrdinalIgnoreCase) && settings.incAnimationClips)
                 return true;
@@ -144,7 +154,7 @@ namespace AvatarSmartBackup
             foreach (var raw in settings.includeFolders)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                string trimmed = raw.Trim().Replace("\\", "/");
+                string trimmed = raw.Trim().Replace("\", "/");
                 if (!trimmed.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!trimmed.EndsWith("/")) trimmed += "/";
                 if (seen.Add(trimmed)) result.Add(trimmed);
@@ -162,7 +172,7 @@ namespace AvatarSmartBackup
                 string trimmed = raw.Trim();
                 if (trimmed.StartsWith("*")) trimmed = trimmed.Substring(1);
                 if (!trimmed.StartsWith(".")) continue;
-                if (HeavySkipSet.Contains(trimmed)) continue;
+                if (HeavySkipSet.Contains(trimmed) || string.Equals(trimmed, ".cs", StringComparison.OrdinalIgnoreCase)) continue;
                 set.Add(trimmed);
             }
             return set;
