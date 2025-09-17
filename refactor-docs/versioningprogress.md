@@ -1,11 +1,11 @@
 # Versioning progress & TODO
 **Status:** Work-in-progress — implementazioni incrementali.  
-**Note importanti:** NON rimuovere manifest_v2 in massa; nessun cleanup legacy automatico in questa fase. Le modifiche DEVONO essere non invasive.
+**Note importanti:** NON rimuovere manifest_v2 in massa; nessun cleanup legacy automatico in questa fase. Le modifiche DEVONO essere non invasive sulla UI e implementazione attuale raggiungendo comunque gli obiettivi. In caso di necessita chiedere all'utente per il permesso di modifiche.
 
 ## 1. Obiettivo
 - Rendere il restore incrementale **chiaro e affidabile** per utenti non tecnici.
-- Mantenere UI semplice di default; esporre opzioni avanzate solo in Advanced Mode.
-- Backend: supportare ricostruzione automatica dello stato completo a partire da checkpoint + delta.
+- Mantenere UI semplice di default; esporre opzioni avanzate solo in Advanced Mode (come gia implementato).
+- Backend: supportare ricostruzione automatica dello stato completo a partire da checkpoint + delta, rendendo facile ma efficace il restore in qualsiasi punto del tempo.
 
 ## 2. Priorità (ordine di lavoro)
 1. Etichette/version metadata: marcare ogni Version come `Checkpoint` (completo) o `Incrementale` e mostrare chiaramente il tipo in UI.
