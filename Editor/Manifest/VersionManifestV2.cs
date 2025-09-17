@@ -24,7 +24,6 @@ namespace AvatarSmartBackup
         public long size;
         public long ticks;
         public string metaHash;
-        public string legacyMd5;
     }
 }
 #endif

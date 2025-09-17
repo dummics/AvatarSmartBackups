@@ -19,7 +19,7 @@ namespace AvatarSmartBackup
         {
             if (!assetPath.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
             {
-                if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected (not under Assets/)");
+                if (s?.DiagnosticsEnabled == true) Log.Info($"Filter: {assetPath} rejected (not under Assets/)");
                 return false;
             }
             // Snapshot lists to avoid collection-modified exceptions when UI may change them concurrently
@@ -37,7 +37,7 @@ namespace AvatarSmartBackup
                 });
                 if (!any)
                 {
-                    if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected by includeFolders (no include matched)");
+                    if (s?.DiagnosticsEnabled == true) Log.Info($"Filter: {assetPath} rejected by includeFolders (no include matched)");
                     return false;
                 }
             }
@@ -52,7 +52,7 @@ namespace AvatarSmartBackup
                 return MatchesExt(assetPath, t);
             }))
             {
-                if (s?.debugMode == true) Log.Info($"Filter: {assetPath} rejected by excludeFolders");
+                if (s?.DiagnosticsEnabled == true) Log.Info($"Filter: {assetPath} rejected by excludeFolders");
                 return false;
             }
             return true;

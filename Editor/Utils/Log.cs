@@ -84,7 +84,7 @@ namespace AvatarSmartBackup
             // Always log Warn and Error to file
             if (level >= Level.Warn) return true;
             
-            // Log Debug and Info only if debug logging is enabled
+            // Log Debug and Info only if advanced logging is enabled
             if (settings.enableDebugLogging) return true;
             
             return false;
@@ -116,9 +116,9 @@ namespace AvatarSmartBackup
             if (ShouldLogToFile(Level.Debug))
                 WriteToFile(Level.Debug, detailedMsg);
             
-            // Only show in console if debug mode is enabled
+            // Only show in console if advanced mode is enabled
             var settings = SafeGetSettings();
-            if (settings.debugMode && !string.IsNullOrEmpty(consoleMsg))
+            if (settings.DiagnosticsEnabled && !string.IsNullOrEmpty(consoleMsg))
                 LogToConsole(Level.Debug, consoleMsg);
         }
 
@@ -143,11 +143,6 @@ namespace AvatarSmartBackup
             LogToConsole(Level.Error, consoleMsg ?? detailedMsg);
         }
 
-        // Legacy API compatibility (will be updated in Task 3)
-        public static void Info(string msg) => Info(msg, msg);
-        public static void Warn(string msg) => Warn(msg, msg);  
-        public static void Err(string msg) => Error(msg, msg);
-        
         // Utility methods
         public static string GetLogDirectory() => LogDir;
         public static string GetCurrentLogFile() => CurrentLogFile;

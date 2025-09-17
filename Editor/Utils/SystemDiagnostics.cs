@@ -5,16 +5,16 @@ using UnityEngine;
 namespace AvatarSmartBackup
 {
     /// <summary>
-    /// Consolidated system diagnostics - visible only in debug mode
+    /// Consolidated system diagnostics - visible only in advanced mode
     /// </summary>
     public static class SystemDiagnostics
     {
-        // Only show debug menu items when debug mode is enabled
+        // Only show debug menu items when advanced mode is enabled
     [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Test Versioning (File-Based)", false, 900)]
         public static void TestFileVersioning()
         {
             var settings = BackupManager.LoadSettings();
-            if (!settings.debugMode)
+            if (!settings.DiagnosticsEnabled)
             {
                 EditorUtility.DisplayDialog("Debug Mode Required", 
                     "Debug tests are only available when Debug Mode is enabled in Advanced Settings.", "OK");
@@ -48,7 +48,7 @@ namespace AvatarSmartBackup
         public static void ShowSystemInfo()
         {
             var settings = BackupManager.LoadSettings();
-            if (!settings.debugMode)
+            if (!settings.DiagnosticsEnabled)
             {
                 EditorUtility.DisplayDialog("Debug Mode Required", 
                     "Debug tests are only available when Debug Mode is enabled in Advanced Settings.", "OK");
@@ -65,13 +65,13 @@ namespace AvatarSmartBackup
             EditorUtility.DisplayDialog("System Information", info.ToString(), "OK");
             Debug.Log($"System Info:\n{info}");
         }
-        // Validate menu items only show in debug mode
+        // Validate menu items only show in advanced mode
     [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Test Versioning (File-Based)", true)]
     [MenuItem("Tools/Avatar Smart Backup Debug/Tests/Show System Info", true)]
         public static bool ValidateDebugMenus()
         {
             var settings = BackupManager.LoadSettings();
-            return settings?.debugMode == true;
+            return settings?.DiagnosticsEnabled == true;
         }
     }
 }
