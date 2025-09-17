@@ -626,7 +626,6 @@ namespace AvatarSmartBackup
                                 {
                                     Log.Warn($"Copy failed: {job.src} - {ex.Message}");
                                 }
-}
                                 finally
                                 {
                                     throttler.Release();
