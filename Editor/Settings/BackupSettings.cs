@@ -50,6 +50,20 @@ namespace AvatarSmartBackup
 
         public bool saveScenesBeforeBackup = false;    // Avoid blocking by default
 
+        public bool diskSpaceProtection = true;
+        public bool blockBackupOnLowSpace = true;
+        public long diskWarningFreeMB = 2048;
+        public long diskCriticalFreeMB = 1024;
+        public float diskWarningFreePercent = 0.10f;
+        public float diskCriticalFreePercent = 0.05f;
+        public long diskPreBackupBufferMB = 512;
+
+        public bool filtersDirty = false;
+        public long filtersChangedTicks = 0;
+
+        public bool easyMode = false;
+        public bool onboardingCompleted = false;
+
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
         
@@ -62,7 +76,8 @@ namespace AvatarSmartBackup
         // Reasonable defaults that work automatically - exposed only in advanced mode for power users
         public int manualSnapshotCooldownSeconds = 30;   // Longer default to prevent accidental spam
         public int manualBenchmarkCooldownSeconds = 60;  // Longer to avoid repeated disk stress
-        public int minManualBackupIntervalSeconds = 120; // 2 minutes minimum for manual backups        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
+        public int minManualBackupIntervalSeconds = 120; // 2 minutes minimum for manual backups
+        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
         public bool extWithinIncludeFolders = true;
 
         public bool AdvancedMode
@@ -83,3 +98,4 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+

@@ -34,6 +34,8 @@ namespace AvatarSmartBackup
         bool _showAdded = true;
         bool _showModified = true;
         bool _showRemoved = true;
+        bool _showNamesOnly = false;
+        bool _highlightSearch = true;
 
         public static void Open(VersionInfo version, VersionDeltaMetadata metadata)
         {
@@ -140,21 +142,29 @@ namespace AvatarSmartBackup
         {
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(L.T("vc.filter.search", "Search"), GUILayout.Width(50));
-            string newSearch = EditorGUILayout.TextField(_search ?? string.Empty);
+            string newSearch = EditorGUILayout.TextField(_search ?? string.Empty, GUILayout.ExpandWidth(true));
             if (!string.Equals(newSearch, _search, StringComparison.Ordinal))
                 _search = newSearch;
-            GUILayout.Space(12);
+            if (GUILayout.Button(L.T("vc.filter.clear", "Clear"), GUILayout.Width(60)))
+                _search = string.Empty;
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
             DrawFilterToggle(ref _showAdded, ColorAdded, L.T("vc.filter.added", "New"));
             DrawFilterToggle(ref _showModified, ColorModified, L.T("vc.filter.modified", "Changed"));
             DrawFilterToggle(ref _showRemoved, ColorRemoved, L.T("vc.filter.removed", "Removed"));
+            GUILayout.Space(8);
+            _showNamesOnly = GUILayout.Toggle(_showNamesOnly, L.T("vc.filter.namesonly", "File name only"), EditorStyles.miniButton, GUILayout.Width(140));
+            _highlightSearch = GUILayout.Toggle(_highlightSearch, L.T("vc.filter.highlight", "Highlight hits"), EditorStyles.miniButton, GUILayout.Width(140));
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
         }
 
         void DrawFilterToggle(ref bool value, Color tint, string label)
         {
-            Rect rect = GUILayoutUtility.GetRect(StyleCache.FilterBadgeWidth, 20f, Styles.BadgeLabel, GUILayout.MaxWidth(StyleCache.FilterBadgeWidth));
-            EditorGUI.DrawRect(rect, tint);
+            Rect rect = GUILayoutUtility.GetRect(StyleCache.FilterBadgeWidth, 20f, Styles.ToggleLabel, GUILayout.MaxWidth(StyleCache.FilterBadgeWidth));
+            Color fill = value ? tint : new Color(tint.r, tint.g, tint.b, tint.a * 0.35f);
+            EditorGUI.DrawRect(rect, fill);
             bool toggled = GUI.Toggle(rect, value, label, Styles.ToggleLabel);
             if (toggled != value) value = toggled;
         }
@@ -195,10 +205,11 @@ namespace AvatarSmartBackup
             var typeRect = new Rect(rect.x + 8, rect.y + 2, 90, rect.height - 4);
             GUI.Label(typeRect, GetKindLabel(row.Kind), Styles.KindLabel);
 
-            var pathRect = new Rect(typeRect.xMax + 6, rect.y + 2, rect.width - 200, rect.height - 4);
-            GUI.Label(pathRect, row.Path, Styles.PathLabel);
+            var pathRect = new Rect(typeRect.xMax + 6, rect.y + 2, rect.width - 220, rect.height - 4);
+            var displayPath = _showNamesOnly ? Path.GetFileName(row.Path) : row.Path;
+            DrawHighlightedLabel(pathRect, displayPath ?? string.Empty, row.Path);
 
-            var categoryRect = new Rect(rect.xMax - 100, rect.y + 2, 60, rect.height - 4);
+            var categoryRect = new Rect(rect.xMax - 110, rect.y + 2, 70, rect.height - 4);
             if (!string.IsNullOrEmpty(row.Category))
                 GUI.Label(categoryRect, row.Category, Styles.CategoryLabel);
 
@@ -207,6 +218,26 @@ namespace AvatarSmartBackup
                 var sizeRect = new Rect(rect.xMax - 40, rect.y + 2, 36, rect.height - 4);
                 GUI.Label(sizeRect, FormatSize(row.Size), Styles.SizeLabel);
             }
+        }
+
+        void DrawHighlightedLabel(Rect rect, string displayText, string fullPath)
+        {
+            displayText ??= string.Empty;
+            fullPath ??= displayText;
+            if (_highlightSearch && !string.IsNullOrEmpty(_search))
+            {
+                int idx = displayText.IndexOf(_search, StringComparison.OrdinalIgnoreCase);
+                if (idx >= 0)
+                {
+                    var prefix = displayText.Substring(0, idx);
+                    var match = displayText.Substring(idx, _search.Length);
+                    var suffix = displayText.Substring(idx + _search.Length);
+                    string rich = prefix + "<color=#FFD760><b>" + match + "</b></color>" + suffix;
+                    GUI.Label(rect, new GUIContent(rich, fullPath), Styles.HighlightPathLabel);
+                    return;
+                }
+            }
+            GUI.Label(rect, new GUIContent(displayText, fullPath), Styles.PathLabel);
         }
 
         List<ChangeRow> BuildRows()
@@ -328,6 +359,7 @@ namespace AvatarSmartBackup
             static GUIStyle _toggleLabel;
             static GUIStyle _kindLabel;
             static GUIStyle _pathLabel;
+            static GUIStyle _highlightPathLabel;
             static GUIStyle _categoryLabel;
             static GUIStyle _sizeLabel;
 
@@ -343,10 +375,24 @@ namespace AvatarSmartBackup
                 normal = { textColor = EditorStyles.miniBoldLabel.normal.textColor }
             };
 
-            public static GUIStyle ToggleLabel => _toggleLabel ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            public static GUIStyle ToggleLabel
             {
-                alignment = TextAnchor.MiddleCenter
-            };
+                get
+                {
+                    if (_toggleLabel == null)
+                    {
+                        _toggleLabel = new GUIStyle(EditorStyles.miniBoldLabel)
+                        {
+                            alignment = TextAnchor.MiddleCenter
+                        };
+                        _toggleLabel.normal.textColor = Color.white;
+                        _toggleLabel.focused.textColor = Color.white;
+                        _toggleLabel.active.textColor = Color.white;
+                        _toggleLabel.hover.textColor = Color.white;
+                    }
+                    return _toggleLabel;
+                }
+            }
 
             public static GUIStyle KindLabel => _kindLabel ??= new GUIStyle(EditorStyles.miniBoldLabel)
             {
@@ -357,6 +403,18 @@ namespace AvatarSmartBackup
             {
                 alignment = TextAnchor.MiddleLeft
             };
+
+            public static GUIStyle HighlightPathLabel
+            {
+                get
+                {
+                    if (_highlightPathLabel == null)
+                    {
+                        _highlightPathLabel = new GUIStyle(PathLabel) { richText = true };
+                    }
+                    return _highlightPathLabel;
+                }
+            }
 
             public static GUIStyle CategoryLabel => _categoryLabel ??= new GUIStyle(EditorStyles.miniLabel)
             {

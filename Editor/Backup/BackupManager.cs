@@ -56,6 +56,35 @@ namespace AvatarSmartBackup
             if (s.lastMeasuredMBps < 0f) s.lastMeasuredMBps = 0f;
             if (s.lastBackupBytes < 0) s.lastBackupBytes = 0;
             if (s.forceFullCheckpointEveryN < 0) s.forceFullCheckpointEveryN = 0;
+            if (s.diskWarningFreeMB <= 0 && s.diskWarningFreePercent <= 0f && s.diskCriticalFreeMB <= 0 && s.diskCriticalFreePercent <= 0f)
+            {
+                s.diskWarningFreeMB = 2048;
+                s.diskCriticalFreeMB = 1024;
+                s.diskWarningFreePercent = 0.10f;
+                s.diskCriticalFreePercent = 0.05f;
+                s.diskPreBackupBufferMB = Math.Max(s.diskPreBackupBufferMB, 512);
+                if (!s.diskSpaceProtection) s.diskSpaceProtection = true;
+            }
+            if (s.diskWarningFreeMB < 0) s.diskWarningFreeMB = 0;
+            if (s.diskCriticalFreeMB < 0) s.diskCriticalFreeMB = 0;
+            if (s.diskWarningFreePercent < 0f) s.diskWarningFreePercent = 0f;
+            if (s.diskWarningFreePercent > 0.5f) s.diskWarningFreePercent = 0.5f;
+            if (s.diskCriticalFreePercent < 0f) s.diskCriticalFreePercent = 0f;
+            if (s.diskCriticalFreePercent > 0.3f) s.diskCriticalFreePercent = 0.3f;
+            if (s.diskPreBackupBufferMB < 0) s.diskPreBackupBufferMB = 0;
+            if (s.diskCriticalFreeMB > 0 && s.diskWarningFreeMB > 0 && s.diskCriticalFreeMB > s.diskWarningFreeMB)
+                s.diskCriticalFreeMB = Math.Max(512, Math.Min(s.diskWarningFreeMB, s.diskCriticalFreeMB));
+            if (s.diskCriticalFreePercent > 0 && s.diskWarningFreePercent > 0 && s.diskCriticalFreePercent > s.diskWarningFreePercent)
+                s.diskCriticalFreePercent = Math.Min(s.diskWarningFreePercent, s.diskCriticalFreePercent);
+            if (s.diskPreBackupBufferMB == 0) s.diskPreBackupBufferMB = 512;
+
+            if (s.diskWarningFreeMB < 0) s.diskWarningFreeMB = 0;
+            if (s.diskCriticalFreeMB < 0) s.diskCriticalFreeMB = 0;
+            if (s.diskWarningFreePercent < 0f) s.diskWarningFreePercent = 0f;
+            if (s.diskWarningFreePercent > 0.5f) s.diskWarningFreePercent = 0.5f;
+            if (s.diskCriticalFreePercent < 0f) s.diskCriticalFreePercent = 0f;
+            if (s.diskCriticalFreePercent > 0.3f) s.diskCriticalFreePercent = 0.3f;
+            if (s.diskPreBackupBufferMB < 0) s.diskPreBackupBufferMB = 0;
 
             // Sync dropdown presets with stored numeric limits (for backward compatibility)
             long[] presetVals = new long[] { 256, 512, 1024, 2048, 4096 };
@@ -457,6 +486,26 @@ namespace AvatarSmartBackup
             long totalBytes = 0;
             int copied = 0;
             string normalizedReason = string.IsNullOrEmpty(reason) ? "timer" : reason;
+            bool ShouldAbortForDisk(DiskSpaceReport report)
+            {
+                if (report.Status == DiskSpaceStatus.Critical && report.BlockBackup)
+                {
+                    string title = "Low Disk Space";
+                    string msg = report.Message + "\n\nBackup aborted.";
+                    MainThread.Invoke(() => EditorUtility.DisplayDialog(title, msg, "OK"));
+                    Log.Warn(report.Message, title);
+                    return true;
+                }
+                if (report.Status == DiskSpaceStatus.Warning)
+                {
+                    Log.Warn(report.Message, "Low disk space warning");
+                }
+                else if (report.Status == DiskSpaceStatus.Critical)
+                {
+                    Log.Warn(report.Message, "Low disk space");
+                }
+                return false;
+            }
             try
             {
                 if (Interlocked.Exchange(ref _busy, 1) == 1)
@@ -479,6 +528,15 @@ namespace AvatarSmartBackup
                 }
 
                 await _one.WaitAsync();
+
+                long estimatedPreBytes = s.lastBackupBytes > 0 ? s.lastBackupBytes : 50L * 1024L * 1024L;
+                var preReport = DiskSpaceMonitor.Check(s, estimatedPreBytes, DiskSpaceStage.PreCheck);
+                if (ShouldAbortForDisk(preReport))
+                {
+                    Interlocked.Exchange(ref _busy, 0);
+                    try { _one.Release(); } catch { }
+                    return;
+                }
 
                 await EnsureBenchmarkAsync(s);
                 int copyCap = EffectiveCopyMBps(s);
@@ -512,6 +570,14 @@ namespace AvatarSmartBackup
                 totalBytes = plan.TotalBytes;
                 copied = plan.CopiedCount;
                 int skipped = plan.SkippedCount;
+
+                var planReport = DiskSpaceMonitor.Check(s, totalBytes, DiskSpaceStage.PlanEstimate);
+                if (ShouldAbortForDisk(planReport))
+                {
+                    Interlocked.Exchange(ref _busy, 0);
+                    try { _one.Release(); } catch { }
+                    return;
+                }
 
                 // 2) Copie (background, non modale, throttled)
                 if (copyJobs.Count > 0)
@@ -604,7 +670,7 @@ namespace AvatarSmartBackup
                 Log.Info(detailedMsg, "Backup completed successfully");
 
                 // Create version for this backup (only if there were changes or it's a manual backup)
-                if (copied > 0 || reason == "manual")
+                if (copied > 0 || reason == "manual" || s.filtersDirty)
                 {
                     try
                     {
@@ -616,12 +682,18 @@ namespace AvatarSmartBackup
                             "vrchat-preprocess" => "Before VRChat Build",
                             _ => "Auto backup"
                         };
-                        
-                        versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir, s, forceCheckpoint: null);
+
+                        bool? forceCheckpoint = s.filtersDirty ? true : (bool?)null;
+                        versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir, s, forceCheckpoint: forceCheckpoint);
                         if (versionCreated)
                         {
                             Log.Info("Version created for this backup");
                             s.selectionLocked = true;
+                            if (s.filtersDirty)
+                            {
+                                s.filtersDirty = false;
+                                s.filtersChangedTicks = 0;
+                            }
 
                             try
                             {
@@ -657,6 +729,7 @@ namespace AvatarSmartBackup
                     SaveSettings(s);
                     TimerService.InvalidateSettingsCache();
                 });
+                DiskSpaceMonitor.Check(s, 0, DiskSpaceStage.PostBackup);
                 success = true;
             }
             catch (OperationCanceledException)

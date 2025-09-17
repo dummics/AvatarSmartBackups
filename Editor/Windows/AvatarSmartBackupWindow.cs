@@ -60,9 +60,20 @@ namespace AvatarSmartBackup
             w.minSize = new Vector2(320, 320);
             w.Show();
         }
+
+        [MenuItem("Avatar Smart Backup/Restart Onboarding", false, 20)]
+        public static void RestartOnboarding()
+        {
+            var settings = BackupManager.LoadSettings();
+            settings.onboardingCompleted = false;
+            BackupManager.SaveSettings(settings);
+            TimerService.InvalidateSettingsCache();
+            Open();
+        }
         void OnEnable()
         {
             _settings = BackupManager.LoadSettings();
+            RunOnboardingIfNeeded();
             BackupEvents.BackupCompleted += OnBackupCompleted;
         }
         void OnDisable()
@@ -110,22 +121,84 @@ namespace AvatarSmartBackup
         {
             EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("window.main.header", "Avatar Smart Backup"), EditorStyles.boldLabel);
             EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("window.main.autobackup.help", "Automatic safety copies run in the background. Use 'Backup Now' to force one (throttled)."), MessageType.Info);
+            DrawModeSelector();
+            _settings.AdvancedMode = !_settings.easyMode;
             DrawSchedulerSection();
             DrawPrimaryActions();
             DrawVersionsOverview();
             EditorGUILayout.Space();
-            bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.advancedMode", "Advanced Mode"), AvatarSmartBackup.Localization.L.T("ui.advancedMode.tooltip", "Show advanced options (filters, performance, verify, retention).")), _settings.AdvancedMode);
-            if (newAdvanced != _settings.AdvancedMode)
+            if (_settings.easyMode)
             {
-                _settings.AdvancedMode = newAdvanced;
-                TimerService.InvalidateSettingsCache();
+                DrawEasyModeFooter();
+                return;
             }
-            if (_settings.AdvancedMode)
+            DrawAdvancedOverview();
+            DrawAdvancedSettings();
+        }
+        void RunOnboardingIfNeeded()
+        {
+            if (_settings == null)
+                _settings = BackupManager.LoadSettings();
+
+            if (_settings.onboardingCompleted)
+                return;
+
+            bool awaitingChoice = true;
+            while (awaitingChoice)
             {
-                DrawAdvancedOverview();
-                DrawAdvancedSettings();
+                int choice = EditorUtility.DisplayDialogComplex(
+                    AvatarSmartBackup.Localization.L.T("onboarding.title", "Welcome to Avatar Smart Backup"),
+                    AvatarSmartBackup.Localization.L.T("onboarding.body", "Choose the experience that fits you best. You can change it later from the mode selector."),
+                    AvatarSmartBackup.Localization.L.T("ui.mode.easy", "Easy"),
+                    AvatarSmartBackup.Localization.L.T("ui.mode.advanced", "Advanced"),
+                    AvatarSmartBackup.Localization.L.T("onboarding.learn", "Learn more"));
+
+                if (choice == 2)
+                {
+                    EditorUtility.DisplayDialog(
+                        AvatarSmartBackup.Localization.L.T("onboarding.title", "Welcome to Avatar Smart Backup"),
+                        AvatarSmartBackup.Localization.L.T("onboarding.learn.body", "Easy mode keeps the essentials. Advanced mode exposes all tools."),
+                        "OK");
+                    continue;
+                }
+
+                _settings.easyMode = (choice == 0);
+                _settings.AdvancedMode = !_settings.easyMode;
+                awaitingChoice = false;
+            }
+
+            _settings.onboardingCompleted = true;
+            BackupManager.SaveSettings(_settings);
+            TimerService.InvalidateSettingsCache();
+        }
+
+        void DrawModeSelector()
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.mode.label", "Mode"), GUILayout.Width(60));
+            string[] modes = { AvatarSmartBackup.Localization.L.T("ui.mode.easy", "Easy"), AvatarSmartBackup.Localization.L.T("ui.mode.advanced", "Advanced") };
+            int current = _settings.easyMode ? 0 : 1;
+            int newMode = GUILayout.Toolbar(current, modes, GUILayout.Width(200));
+            EditorGUILayout.EndHorizontal();
+            if (newMode != current)
+            {
+                _settings.easyMode = newMode == 0;
+                _settings.AdvancedMode = !_settings.easyMode;
             }
         }
+
+        void DrawEasyModeFooter()
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.easy.summary", "Easy mode shows the essentials. Switch to Advanced for detailed controls."), EditorStyles.wordWrappedMiniLabel);
+            if (GUILayout.Button(AvatarSmartBackup.Localization.L.T("ui.easy.switch", "Switch to Advanced"), GUILayout.Width(200)))
+            {
+                _settings.easyMode = false;
+                _settings.AdvancedMode = true;
+            }
+            EditorGUILayout.EndVertical();
+        }
+
         void DrawSchedulerSection()
         {
             EditorGUILayout.BeginVertical("box");
@@ -152,6 +225,11 @@ namespace AvatarSmartBackup
                 var lastStr = Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? never;
                 EditorGUILayout.LabelField($"{nextLabel}: {nextStr}    {lastLabel}: {lastStr}");
             }
+            DrawDiskStatusRow();
+            if (_settings.filtersDirty && _settings.easyMode)
+            {
+                EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.filters.pending", "Filter changes pending. The next backup will create a full checkpoint to apply the new scope."), MessageType.Info);
+            }
             if (_settings.AdvancedMode)
             {
                 EditorGUILayout.Space(4);
@@ -176,6 +254,34 @@ namespace AvatarSmartBackup
                 DrawIntervalControls();
             }
             EditorGUILayout.EndVertical();
+        void DrawDiskStatusRow()
+        {
+            var report = DiskSpaceMonitor.LastReport;
+            if (report.Status == DiskSpaceStatus.Unknown)
+                return;
+
+            var snapshot = report.Snapshot;
+            if (snapshot.totalBytes <= 0)
+                return;
+
+            string summary = $"Disk free: {DiskSpaceMonitor.FormatBytes(snapshot.freeBytes)} / {DiskSpaceMonitor.FormatBytes(snapshot.totalBytes)}";
+            summary += $" • Backups: {DiskSpaceMonitor.FormatBytes(snapshot.backupSizeBytes)}";
+            if (report.RequiredBytes > 0 && report.Stage != DiskSpaceStage.PostBackup)
+            {
+                summary += $" • Next estimate: {DiskSpaceMonitor.FormatBytes(report.RequiredBytes)}";
+            }
+
+            MessageType type = report.Status switch
+            {
+                DiskSpaceStatus.Warning => MessageType.Warning,
+                DiskSpaceStatus.Critical => MessageType.Error,
+                DiskSpaceStatus.Error => MessageType.Warning,
+                _ => MessageType.Info
+            };
+
+            EditorGUILayout.HelpBox(summary, type);
+        }
+
         void DrawIntervalControls()
         {
             EditorGUILayout.BeginHorizontal();
@@ -851,14 +957,22 @@ namespace AvatarSmartBackup
             // FOLDERS & EXTENSIONS
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Folders & Types", EditorStyles.boldLabel);
+            bool filtersChanged = false;
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Add folders from Project or simple extensions (e.g., .prefab).", EditorStyles.miniLabel);
+            EditorGUI.BeginChangeCheck();
             _settings.extWithinIncludeFolders = EditorGUILayout.ToggleLeft(new GUIContent("Apply extensions only within included folders", "When enabled, extensions like .prefab are searched only inside the folders you included."), _settings.extWithinIncludeFolders);
+            if (EditorGUI.EndChangeCheck()) filtersChanged = true;
             EditorGUILayout.EndVertical();
-            DrawIncludeExcludeSection("Include", _settings.includeFolders, ref _newIncludePattern, ref _includePrefix, ref _includeFolderObj);
+            filtersChanged |= DrawIncludeExcludeSection("Include", _settings.includeFolders, ref _newIncludePattern, ref _includePrefix, ref _includeFolderObj);
             EditorGUILayout.Space(6);
-            DrawIncludeExcludeSection("Exclude", _settings.excludeFolders, ref _newExcludePattern, ref _excludePrefix, ref _excludeFolderObj);
+            filtersChanged |= DrawIncludeExcludeSection("Exclude", _settings.excludeFolders, ref _newExcludePattern, ref _excludePrefix, ref _excludeFolderObj);
             DrawTrackedSelectionSection();
+            if (filtersChanged) FlagFiltersChanged();
+            if (_settings.filtersDirty)
+            {
+                EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.filters.pending", "Filter changes pending. The next backup will create a full checkpoint to apply the new scope."), MessageType.Info);
+            }
             EditorGUILayout.EndVertical();
             EditorGUILayout.BeginVertical("box");
             _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Diagnostics & utilities", "Enable additional tools (benchmark, detailed logs)."), _settings.debugMode);
@@ -895,136 +1009,60 @@ namespace AvatarSmartBackup
         }
         void DrawTrackedSelectionSection()
         {
-            if (_settings.trackedRoots == null) _settings.trackedRoots = new List<string>();
+            if (_settings.trackedRoots == null)
+                _settings.trackedRoots = new List<string>();
+
             var tracked = _settings.trackedRoots;
             bool frozen = BackupManager.IsSelectionFrozen(_settings);
+
+            if (tracked.Count == 0 && !frozen)
+                return; // nothing legacy to show
+
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Tracked Selection", EditorStyles.boldLabel);
+
             if (tracked.Count == 0)
             {
                 EditorGUILayout.LabelField("Tracking all assets allowed by filters.", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField("Selection locked once versions exist.", EditorStyles.miniBoldLabel);
+                EditorGUILayout.EndVertical();
+                return;
             }
-            else
+
+            EditorGUILayout.LabelField("Legacy entries kept for compatibility (read-only).", EditorStyles.wordWrappedMiniLabel);
+            foreach (var entry in tracked)
             {
-                int removeIndex = -1;
-                for (int i = 0; i < tracked.Count; i++)
-                {
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField(tracked[i], GUILayout.ExpandWidth(true));
-                    if (GUILayout.Button("Remove", GUILayout.Width(70))) removeIndex = i;
-                    EditorGUILayout.EndHorizontal();
-                }
-                if (removeIndex >= 0)
-                {
-                    var updated = new List<string>(tracked);
-                    updated.RemoveAt(removeIndex);
-                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
-                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
-                    _settings = BackupManager.LoadSettings();
-                    TimerService.InvalidateSettingsCache();
-                    EditorGUILayout.EndVertical();
-                    return;
-                }
+                EditorGUILayout.LabelField(entry, EditorStyles.miniLabel);
             }
-            string folderToAdd = null;
-            string fileToAdd = null;
-            EditorGUILayout.Space(4);
-            using (new EditorGUI.DisabledScope(frozen))
-            {
-                EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Add Folder...", GUILayout.Width(110)))
-                {
-                    folderToAdd = EditorUtility.OpenFolderPanel("Select folder", FileUtilEx.ProjectRoot, string.Empty);
-                }
-                if (GUILayout.Button("Add File...", GUILayout.Width(110)))
-                {
-                    fileToAdd = EditorUtility.OpenFilePanel("Select asset", FileUtilEx.ProjectRoot, "*");
-                }
-                EditorGUILayout.EndHorizontal();
-                if (!_settings.selectionLocked && GUILayout.Button("Lock Selection"))
-                {
-                    if (!BackupManager.TryUpdateTrackedSelection(_settings.trackedRoots, true, out var err))
-                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to lock selection.", "OK");
-                    _settings = BackupManager.LoadSettings();
-                    TimerService.InvalidateSettingsCache();
-                    EditorGUILayout.EndVertical();
-                    return;
-                }
-            }
-            if (!string.IsNullOrEmpty(folderToAdd))
-            {
-                string rel = FileUtilEx.MakeRelToProject(folderToAdd).Replace("\\", "/");
-                if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
-                {
-                    EditorUtility.DisplayDialog("Tracked Selection", "Please choose a folder inside the Assets directory.", "OK");
-                }
-                else
-                {
-                    if (!rel.EndsWith("/")) rel += "/";
-                    var updated = new List<string>(_settings.trackedRoots ?? new List<string>()) { rel };
-                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
-                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
-                    _settings = BackupManager.LoadSettings();
-                    TimerService.InvalidateSettingsCache();
-                    EditorGUILayout.EndVertical();
-                    return;
-                }
-            }
-            if (!string.IsNullOrEmpty(fileToAdd))
-            {
-                string rel = FileUtilEx.MakeRelToProject(fileToAdd).Replace("\\", "/");
-                if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase))
-                {
-                    EditorUtility.DisplayDialog("Tracked Selection", "Please choose a file inside the Assets directory.", "OK");
-                }
-                else if (rel.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-                {
-                    EditorUtility.DisplayDialog("Tracked Selection", "Script files (.cs) are excluded from backups.", "OK");
-                }
-                else
-                {
-                    var updated = new List<string>(_settings.trackedRoots ?? new List<string>()) { rel };
-                    if (!BackupManager.TryUpdateTrackedSelection(updated, _settings.selectionLocked, out var err))
-                        EditorUtility.DisplayDialog("Tracked Selection", err ?? "Failed to update selection.", "OK");
-                    _settings = BackupManager.LoadSettings();
-                    TimerService.InvalidateSettingsCache();
-                    EditorGUILayout.EndVertical();
-                    return;
-                }
-            }
-            if (frozen)
-            {
-                EditorGUILayout.HelpBox("Selection locked. Remove entries to narrow scope. Reset settings to change additions.", MessageType.Info);
-            }
+            EditorGUILayout.HelpBox("Use Folders & Types to adjust what gets backed up. Tracked selection editing is deprecated.", MessageType.Info);
             EditorGUILayout.EndVertical();
         }
-        static void DrawStringListVertical(List<string> list, string addLabel)
+
+        void FlagFiltersChanged()
         {
-            int remove = -1;
-            for (int i = 0; i < list.Count; i++)
+            if (!_settings.filtersDirty)
             {
-                EditorGUILayout.BeginHorizontal();
-                list[i] = EditorGUILayout.TextField(list[i], GUILayout.ExpandWidth(true));
-                if (GUILayout.Button("X", GUILayout.Width(20))) remove = i;
-                EditorGUILayout.EndHorizontal();
+                _settings.filtersDirty = true;
+                _settings.filtersChangedTicks = DateTime.UtcNow.Ticks;
             }
-            if (remove >= 0) list.RemoveAt(remove);
-            if (GUILayout.Button(addLabel)) list.Add("Assets/");
         }
-        static void DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object folderObj)
+
+        static bool DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object folderObj)
         {
+            bool changed = false;
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField(title + $":  (" + list.Count + ")", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             using (new EditorGUI.DisabledScope(list.Count == 0))
             {
                 if (GUILayout.Button(new GUIContent("Clear", "Remove all entries from this list"), GUILayout.Width(60)))
+                {
                     list.Clear();
+                    changed = true;
+                }
             }
             EditorGUILayout.EndHorizontal();
-            // Add-area contained in a small box
             EditorGUILayout.BeginVertical("box");
-            // Add folder (Project picker)
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Folder", GUILayout.Width(60));
             var newObj = EditorGUILayout.ObjectField(folderObj, typeof(DefaultAsset), false);
@@ -1041,13 +1079,16 @@ namespace AvatarSmartBackup
                     else
                     {
                         if (!p.EndsWith("/")) p += "/";
-                        if (!list.Contains(p)) list.Add(p);
-                        folderObj = null; // clear selection after add
+                        if (!list.Contains(p))
+                        {
+                            list.Add(p);
+                            changed = true;
+                        }
+                        folderObj = null;
                     }
                 }
             }
             EditorGUILayout.EndHorizontal();
-            // Add extension
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Extension", GUILayout.Width(60));
             newExt = EditorGUILayout.TextField(newExt, GUILayout.ExpandWidth(true));
@@ -1059,12 +1100,15 @@ namespace AvatarSmartBackup
                 if (!string.IsNullOrEmpty(t))
                 {
                     if (!t.StartsWith(".")) t = "." + t;
-                    if (!list.Contains(t)) list.Add(t);
+                    if (!list.Contains(t))
+                    {
+                        list.Add(t);
+                        changed = true;
+                    }
                     newExt = string.Empty;
                 }
             }
             EditorGUILayout.EndHorizontal();
-            // Add prefix (Assets/...)
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Prefix", GUILayout.Width(60));
             newPrefix = EditorGUILayout.TextField(newPrefix, GUILayout.ExpandWidth(true));
@@ -1075,25 +1119,40 @@ namespace AvatarSmartBackup
                 if (!string.IsNullOrEmpty(t))
                 {
                     if (!t.EndsWith("/")) t += "/";
-                    if (!list.Contains(t)) list.Add(t);
+                    if (!list.Contains(t))
+                    {
+                        list.Add(t);
+                        changed = true;
+                    }
                     newPrefix = string.Empty;
                 }
             }
             EditorGUILayout.EndHorizontal();
-            EditorGUILayout.EndVertical(); // end add-area box
+            EditorGUILayout.EndVertical();
             DrawThinSeparator();
-            // Current entries (below)
             int remove = -1;
             for (int i = 0; i < list.Count; i++)
             {
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField("", GUILayout.Width(2));
-                list[i] = EditorGUILayout.TextField(list[i], GUILayout.ExpandWidth(true));
+                var before = list[i];
+                var after = EditorGUILayout.TextField(before, GUILayout.ExpandWidth(true));
+                if (!string.Equals(before, after, StringComparison.Ordinal))
+                {
+                    list[i] = after;
+                    changed = true;
+                }
                 if (GUILayout.Button("X", GUILayout.Width(20))) remove = i;
                 EditorGUILayout.EndHorizontal();
             }
-            if (remove >= 0) list.RemoveAt(remove);
+            if (remove >= 0)
+            {
+                list.RemoveAt(remove);
+                changed = true;
+            }
+            return changed;
         }
+
         static void DrawThinSeparator()
         {
             var rect = EditorGUILayout.GetControlRect(false, 1);
