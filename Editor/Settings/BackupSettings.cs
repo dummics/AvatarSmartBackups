@@ -54,6 +54,8 @@ namespace AvatarSmartBackup
         public bool useProjectSettings = false;
         
         // Advanced-only options
+        public int forceFullCheckpointEveryN = 0;
+        public bool showRebuildTool = false;
         public bool enableDebugLogging = false;        // Detailed logging to file (advanced mode only)
 
         // Cooldowns and anti-spam (seconds)

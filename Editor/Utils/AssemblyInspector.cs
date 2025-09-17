@@ -17,7 +17,7 @@ namespace AvatarSmartBackup.Debugging
                 
                 // Test creating a version
                 string currentDir = System.IO.Path.Combine(FileUtilEx.BackupRoot, "Current");
-                bool created = vm.CreateVersion("Test Version", currentDir);
+                bool created = vm.CreateVersion("Test Version", currentDir, settings: null, forceCheckpoint: true);
                 Debug.Log($"Version creation result: {created}");
                 
                 // Test getting versions

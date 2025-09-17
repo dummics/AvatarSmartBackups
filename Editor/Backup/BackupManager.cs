@@ -55,6 +55,7 @@ namespace AvatarSmartBackup
             if (s.idleDelaySeconds <= 0) s.idleDelaySeconds = 10;
             if (s.lastMeasuredMBps < 0f) s.lastMeasuredMBps = 0f;
             if (s.lastBackupBytes < 0) s.lastBackupBytes = 0;
+            if (s.forceFullCheckpointEveryN < 0) s.forceFullCheckpointEveryN = 0;
 
             // Sync dropdown presets with stored numeric limits (for backward compatibility)
             long[] presetVals = new long[] { 256, 512, 1024, 2048, 4096 };
@@ -609,7 +610,7 @@ namespace AvatarSmartBackup
                             _ => "Auto backup"
                         };
                         
-                        bool versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir);
+                        bool versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir, s, forceCheckpoint: reason == "manual");
                         if (versionCreated)
                         {
                             Log.Info("Version created for this backup");

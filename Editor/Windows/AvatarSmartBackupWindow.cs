@@ -92,12 +92,12 @@ namespace AvatarSmartBackup
         void DrawBackupTab()
         {
             EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Automatic safety copies in background. Usa 'Backup Now' per forzare (throttle applicato).", MessageType.Info);
+            EditorGUILayout.HelpBox("Automatic safety copies run in the background. Use 'Backup Now' to force one (throttled).", MessageType.Info);
             DrawSchedulerSection();
             DrawPrimaryActions();
             DrawVersionsOverview();
             EditorGUILayout.Space();
-            bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent("Advanced Mode", "Mostra opzioni avanzate (filtri, performance, verify, retention)."), _settings.AdvancedMode);
+            bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent("Advanced Mode", "Show advanced options (filters, performance, verify, retention)."), _settings.AdvancedMode);
             if (newAdvanced != _settings.AdvancedMode)
             {
                 _settings.AdvancedMode = newAdvanced;
@@ -131,28 +131,7 @@ namespace AvatarSmartBackup
             if (_settings.AdvancedMode)
             {
                 EditorGUILayout.Space(4);
-                EditorGUILayout.BeginHorizontal();
-                string[] unitOptions = { "min", "sec" };
-                int currentUnitIndex = _settings.intervalInSeconds ? 1 : 0;
-                EditorGUILayout.LabelField("Interval", GUILayout.Width(60));
-                int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, _settings.intervalInSeconds ? 3600 : 240);
-                if (newInterval != _settings.intervalMinutes)
-                    _settings.intervalMinutes = newInterval;
-                int newUnitIndex = EditorGUILayout.Popup(currentUnitIndex, unitOptions, GUILayout.Width(50));
-                if (newUnitIndex != currentUnitIndex)
-                {
-                    // Convert between units
-                    if (newUnitIndex == 1 && !_settings.intervalInSeconds) // Switching to seconds
-                    {
-                        _settings.intervalMinutes = Mathf.Max(1, _settings.intervalMinutes * 60);
-                    }
-                    else if (newUnitIndex == 0 && _settings.intervalInSeconds) // Switching to minutes
-                    {
-                        _settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_settings.intervalMinutes / 60f));
-                    }
-                    _settings.intervalInSeconds = (newUnitIndex == 1);
-                }
-                EditorGUILayout.EndHorizontal();
+                DrawIntervalControls();
                 int effCopy = BackupManager.EffectiveCopyMBps(_settings);
                 if (_settings.lastBackupBytes > 0 && effCopy > 0)
                 {
@@ -170,30 +149,35 @@ namespace AvatarSmartBackup
             {
                 EditorGUILayout.Space(4);
                 // Timer controls (moved from advanced mode)
-                EditorGUILayout.BeginHorizontal();
-                string[] unitOptions = { "min", "sec" };
-                int currentUnitIndex = _settings.intervalInSeconds ? 1 : 0;
-                EditorGUILayout.LabelField("Interval", GUILayout.Width(60));
-                int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, _settings.intervalInSeconds ? 3600 : 240);
-                if (newInterval != _settings.intervalMinutes)
-                    _settings.intervalMinutes = newInterval;
-                int newUnitIndex = EditorGUILayout.Popup(currentUnitIndex, unitOptions, GUILayout.Width(50));
-                if (newUnitIndex != currentUnitIndex)
-                {
-                    // Convert between units
-                    if (newUnitIndex == 1 && !_settings.intervalInSeconds) // Switching to seconds
-                    {
-                        _settings.intervalMinutes = Mathf.Max(1, _settings.intervalMinutes * 60);
-                    }
-                    else if (newUnitIndex == 0 && _settings.intervalInSeconds) // Switching to minutes
-                    {
-                        _settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_settings.intervalMinutes / 60f));
-                    }
-                    _settings.intervalInSeconds = (newUnitIndex == 1);
-                }
-                EditorGUILayout.EndHorizontal();
+                DrawIntervalControls();
             }
             EditorGUILayout.EndVertical();
+        void DrawIntervalControls()
+        {
+            EditorGUILayout.BeginHorizontal();
+            string[] unitOptions = { "min", "sec" };
+            int currentUnitIndex = _settings.intervalInSeconds ? 1 : 0;
+            EditorGUILayout.LabelField("Interval", GUILayout.Width(60));
+            int maxValue = _settings.intervalInSeconds ? 3600 : 240;
+            int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, maxValue);
+            if (newInterval != _settings.intervalMinutes)
+                _settings.intervalMinutes = newInterval;
+            int newUnitIndex = EditorGUILayout.Popup(currentUnitIndex, unitOptions, GUILayout.Width(50));
+            if (newUnitIndex != currentUnitIndex)
+            {
+                if (newUnitIndex == 1 && !_settings.intervalInSeconds)
+                {
+                    _settings.intervalMinutes = Mathf.Max(1, _settings.intervalMinutes * 60);
+                }
+                else if (newUnitIndex == 0 && _settings.intervalInSeconds)
+                {
+                    _settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_settings.intervalMinutes / 60f));
+                }
+                _settings.intervalInSeconds = (newUnitIndex == 1);
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
         }
         void DrawPrimaryActions()
         {
@@ -201,17 +185,17 @@ namespace AvatarSmartBackup
             double now = EditorApplication.timeSinceStartup;
             bool throttle = !_settings.AdvancedMode;
             bool canManual = true;
-            string tooltip = "Esegui subito un backup (cooldown 30s)";
+            string tooltip = "Run a backup now (30s cooldown)";
             if (throttle && _lastManualRunTime > 0 && now - _lastManualRunTime < BackupManualCooldownSeconds)
             {
                 canManual = false;
                 double rem = BackupManualCooldownSeconds - (now - _lastManualRunTime);
-                tooltip = $"Attendi {rem:0}s prima di un altro backup manuale";
+                tooltip = $"Wait {rem:0}s before another manual backup";
             }
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(!canManual || BackupManager.IsBusy))
             {
-                string backupTooltip = _settings.AdvancedMode ? "Esegui subito un backup (nessun cooldown in Advanced Mode)" : tooltip;
+                string backupTooltip = _settings.AdvancedMode ? "Run a backup now (no cooldown in Advanced Mode)" : tooltip;
                 if (GUILayout.Button(new GUIContent("Backup Now", backupTooltip)))
                 {
                     _lastManualRunTime = now;
@@ -222,14 +206,14 @@ namespace AvatarSmartBackup
             var latest = GetLatestVersionCached();
             using (new EditorGUI.DisabledScope(latest == null))
             {
-                string restoreTooltip = latest == null ? "Nessuna versione disponibile" : "Apri la versione più recente per ripristinare o ispezionare";
+                string restoreTooltip = latest == null ? "No version available" : "Open the latest version to restore or inspect";
                 if (GUILayout.Button(new GUIContent("Preview & Restore latest", restoreTooltip)))
                 {
                     if (latest != null)
                         RestorePreviewWindow.Open(latest.id);
                 }
             }
-            if (GUILayout.Button(new GUIContent("Open Backup Folder", "Apri la cartella dei backup")))
+            if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the backups folder")))
             {
                 EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
             }
@@ -241,13 +225,13 @@ namespace AvatarSmartBackup
             EditorGUILayout.LabelField("Advanced Tools", EditorStyles.boldLabel);
             // Single toolbar row with actions
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Open Log Folder", "Apri la cartella dei log per assistenza"), GUILayout.Width(150)))
+            if (GUILayout.Button(new GUIContent("Open Log Folder", "Open the logs folder for support"), GUILayout.Width(150)))
             {
                 string logDir = Log.GetLogDirectory();
                 if (Directory.Exists(logDir)) EditorUtility.RevealInFinder(logDir);
                 else EditorUtility.DisplayDialog("Log Folder", "Log folder not found.", "OK");
             }
-            if (GUILayout.Button(new GUIContent("Refresh Versions", "Ricarica l'elenco delle versioni"), GUILayout.Width(150)))
+            if (GUILayout.Button(new GUIContent("Refresh Versions", "Reload the list of versions"), GUILayout.Width(150)))
             {
                 _cachedVersions = null;
                 EnsureVersionsCache();
@@ -285,7 +269,7 @@ namespace AvatarSmartBackup
         void DrawVersionsTab()
         {
             EditorGUILayout.LabelField("Versions", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Restore points automatically created quando ci sono cambi. Usa la stella per mantenerle, clic per selezionare, doppio click per anteprima.", MessageType.Info);
+            EditorGUILayout.HelpBox("Restore points are automatically created when there are changes. Use the star to pin, click to select, double-click to preview.", MessageType.Info);
             // Versions list (in-place selection, no reordering)
             EnsureVersionsCache();
             var latest = GetLatestVersionCached();
@@ -293,6 +277,11 @@ namespace AvatarSmartBackup
             // Toolbar line
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(new GUIContent("Refresh", "Reload versions from disk"), GUILayout.Width(70))) _cachedVersions = null;
+            if (_settings.showRebuildTool)
+            {
+                if (GUILayout.Button(new GUIContent("Rebuild Index", "Recalculate fileCount/size from existing manifests"), GUILayout.Width(120)))
+                    RunRebuildIndexTool();
+            }
             if (_settings.AdvancedMode)
             {
                 GUI.enabled = !BackupManager.IsBusy;
@@ -302,7 +291,7 @@ namespace AvatarSmartBackup
                     if (GUILayout.Button(new GUIContent("Create Version", allowManualVersion ? "Create a manual restore point" : reasonBlock), GUILayout.Width(110)))
                     {
                         using var vm = new FileBasedVersionManager();
-                        vm.CreateVersion("Manual", Path.Combine(FileUtilEx.BackupRoot, "Current"));
+                        vm.CreateVersion("Manual", Path.Combine(FileUtilEx.BackupRoot, "Current"), _settings, forceCheckpoint: true);
                         _cachedVersions = null; EnsureVersionsCache();
                     }
                 }
@@ -350,10 +339,25 @@ namespace AvatarSmartBackup
                 var created = ParseCreatedUtc(v);
                 EditorGUILayout.LabelField($"Created: {(created == DateTime.MinValue ? "--" : created.ToString("yyyy-MM-dd HH:mm:ss"))}", EditorStyles.miniLabel);
                 EditorGUILayout.LabelField($"Files: {v.fileCount}    Size: {FormatSize(v.totalSizeBytes)}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(BuildVersionTypeSummary(v), EditorStyles.miniLabel);
+                string changeSummary = BuildChangeCountSummary(v);
+                if (!string.IsNullOrEmpty(changeSummary))
+                    EditorGUILayout.LabelField(changeSummary, EditorStyles.miniLabel);
+                if (!v.isCheckpoint && v.checkpointId > 0)
+                {
+                    var cp = _cachedVersions?.FirstOrDefault(cv => cv.id == v.checkpointId);
+                    if (cp != null)
+                    {
+                        var cpDate = ParseCreatedUtc(cp);
+                        string cpLabel = cpDate == DateTime.MinValue ? $"#{cp.id}" : $"#{cp.id} ({cpDate:yyyy-MM-dd HH:mm})";
+                        EditorGUILayout.LabelField($"Source checkpoint: {cpLabel}", EditorStyles.miniLabel);
+                    }
+                }
                 if (isSelected)
                 {
                     GUILayout.Space(4);
                     EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.HelpBox(BuildVersionDetailSummary(v), MessageType.Info);
                     if (_renamingId == v.id)
                     {
                         EditorGUILayout.BeginHorizontal(); GUI.SetNextControlName("RenameField"); _renameBuffer = EditorGUILayout.TextField(_renameBuffer);
@@ -362,11 +366,34 @@ namespace AvatarSmartBackup
                         EditorGUILayout.EndHorizontal(); if (e.isKey && e.keyCode == KeyCode.Return) CommitRename(v);
                     }
                     EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button(new GUIContent("Restore", "Apri anteprima e procedi al ripristino"), GUILayout.Height(22))) RestorePreviewWindow.Open(v.id);
+                    if (GUILayout.Button(new GUIContent("Restore", "Open preview and proceed to restore"), GUILayout.Height(22))) RestorePreviewWindow.Open(v.id);
                     using (new EditorGUI.DisabledScope(v.pinned))
-                    { if (GUILayout.Button(new GUIContent("Delete", v.pinned ? "Versione preferita protetta" : "Elimina versione"), GUILayout.Height(22), GUILayout.Width(70))) { if (!v.pinned && EditorUtility.DisplayDialog("Delete Version", $"Delete version #{v.id}?", "Delete", "Cancel")) pendingDelete = v.id; } }
-                    GUILayout.FlexibleSpace(); EditorGUILayout.EndHorizontal();
-                    EditorGUILayout.LabelField("F2 per rinominare", EditorStyles.miniLabel);
+                    {
+                        if (GUILayout.Button(new GUIContent("Delete", v.pinned ? "Pinned version protected" : "Delete this version"), GUILayout.Height(22), GUILayout.Width(70)))
+                        {
+                            if (!v.pinned && EditorUtility.DisplayDialog("Delete Version", $"Delete version #{v.id}?", "Delete", "Cancel")) pendingDelete = v.id;
+                        }
+                    }
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.BeginHorizontal();
+                    if (GUILayout.Button(new GUIContent("Show changes", "Open a summary of changed files"), GUILayout.Height(22)))
+                    {
+                        ShowVersionDiffSummary(v);
+                    }
+                    GUILayout.FlexibleSpace();
+                    if (_settings.AdvancedMode)
+                    {
+                        using (new EditorGUI.DisabledScope(v.isCheckpoint))
+                        {
+                            if (GUILayout.Button(new GUIContent("Rebuild snapshot", "Generate a temporary snapshot and open the folder"), GUILayout.Height(22)))
+                            {
+                                TriggerSnapshotRebuild(v);
+                            }
+                        }
+                    }
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.LabelField("Press F2 to rename", EditorStyles.miniLabel);
                     EditorGUILayout.EndVertical();
                 }
                 EditorGUILayout.EndVertical();
@@ -424,7 +451,7 @@ namespace AvatarSmartBackup
                 }
                 catch (Exception ex)
                 {
-                    EditorUtility.DisplayDialog("Delete", "Failed: " + ex.Message, "OK");
+                        EditorUtility.DisplayDialog("Delete", "Failed: " + ex.Message, "OK");
                 }
                 _cachedVersions = null; EnsureVersionsCache();
                 if (_selectedVersionId == pendingDelete.Value) _selectedVersionId = -1;
@@ -454,7 +481,7 @@ namespace AvatarSmartBackup
         }
         string FormatSize(long bytes)
         {
-            if (bytes <= 0) return "--";
+            if (bytes <= 0) return "0 B";
             string[] units = { "B", "KB", "MB", "GB" };
             double val = bytes; int u = 0;
             while (val > 1024 && u < units.Length - 1) { val /= 1024; u++; }
@@ -473,6 +500,150 @@ namespace AvatarSmartBackup
                 return info.timestamp.ToLocalTime();
             return DateTime.MinValue;
         }
+        string BuildChangeCountSummary(VersionInfo info)
+        {
+            if (info == null) return string.Empty;
+            if (info.changedFileCount <= 0 && info.removedFileCount <= 0) return string.Empty;
+            string delta = info.changedBytes > 0 ? FormatSize(info.changedBytes) : "0 B";
+            return $"Changes: {info.changedFileCount}  Removed: {info.removedFileCount}  Delta: {delta}";
+        }
+
+        string BuildVersionTypeSummary(VersionInfo info)
+        {
+            if (info == null) return "Type: --";
+            if (info.isCheckpoint) return "Type: Full checkpoint";
+            var parts = new List<string>();
+            if (info.changedFileCount > 0) parts.Add($"{info.changedFileCount} changed");
+            if (info.removedFileCount > 0) parts.Add($"{info.removedFileCount} removed");
+            string suffix = parts.Count > 0 ? string.Join(", ", parts) : "no recorded changes";
+            return $"Type: Incremental ({suffix})";
+        }
+
+        string BuildVersionDetailSummary(VersionInfo info)
+        {
+            if (info == null) return string.Empty;
+            var sb = new StringBuilder();
+            sb.AppendLine(info.isCheckpoint ? "Full checkpoint (complete snapshot)." : "Incremental: automatically reconstructed from checkpoint.");
+            var changeSummary = BuildChangeCountSummary(info);
+            if (!string.IsNullOrEmpty(changeSummary)) sb.AppendLine(changeSummary);
+            if (!info.isCheckpoint && info.checkpointId > 0)
+            {
+                var cp = _cachedVersions?.FirstOrDefault(v => v.id == info.checkpointId);
+                if (cp != null)
+                {
+                    var cpDate = ParseCreatedUtc(cp);
+                    sb.AppendLine($"Source checkpoint: #{cp.id}" + (cpDate == DateTime.MinValue ? string.Empty : $" ({cpDate:yyyy-MM-dd HH:mm})"));
+                }
+            }
+            var catSummary = BuildCategorySummary(info);
+            if (!string.IsNullOrEmpty(catSummary)) sb.AppendLine("Categories: " + catSummary);
+            return sb.ToString().Trim();
+        }
+
+        string BuildCategorySummary(VersionInfo info)
+        {
+            if (info?.categoryStats == null || info.categoryStats.Count == 0) return string.Empty;
+            return string.Join(", ", info.categoryStats
+                .OrderByDescending(cs => cs.count)
+                .ThenBy(cs => cs.category)
+                .Select(cs => $"{cs.category}: {cs.count}"));
+        }
+
+        void ShowVersionDiffSummary(VersionInfo info)
+        {
+            if (info == null) return;
+            try
+            {
+                var meta = VersionRestoreService.LoadDeltaMetadata(info) ?? new VersionDeltaMetadata();
+                var sb = new StringBuilder();
+                sb.AppendLine(BuildVersionDetailSummary(info));
+                if (meta.changedEntries != null && meta.changedEntries.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("Modified:");
+                    int limit = Mathf.Min(20, meta.changedEntries.Count);
+                    for (int i = 0; i < limit; i++)
+                        sb.AppendLine($" • {meta.changedEntries[i].relPath}");
+                    if (meta.changedEntries.Count > limit)
+                        sb.AppendLine($" • (+{meta.changedEntries.Count - limit} more)");
+                }
+                if (meta.removedEntries != null && meta.removedEntries.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("Removed:");
+                    int limit = Mathf.Min(10, meta.removedEntries.Count);
+                    for (int i = 0; i < limit; i++)
+                        sb.AppendLine($" • {meta.removedEntries[i]}");
+                    if (meta.removedEntries.Count > limit)
+                        sb.AppendLine($" • (+{meta.removedEntries.Count - limit} more)");
+                }
+                EditorUtility.DisplayDialog($"Version #{info.id}", sb.ToString().Trim(), "Close");
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Version diff summary failed: " + ex.Message);
+                EditorUtility.DisplayDialog("Show changes", "Unable to read changes:\n" + ex.Message, "OK");
+            }
+        }
+
+        void TriggerSnapshotRebuild(VersionInfo info)
+        {
+            if (info == null) return;
+            try
+            {
+                string path = VersionRestoreService.PrepareSnapshot(info.id, forceRebuild: true);
+                Log.Info($"Snapshot rebuilt for version #{info.id}: {path}");
+                EditorUtility.RevealInFinder(path);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Rebuild snapshot: " + ex.Message);
+                EditorUtility.DisplayDialog("Rebuild snapshot", "Unable to rebuild version:\n" + ex.Message, "OK");
+            }
+        }
+        void RunRebuildIndexTool()
+        {
+            try
+            {
+                using var vm = new FileBasedVersionManager();
+                var preview = vm.RebuildIndex(applyChanges: false);
+                if (!preview.HasChanges && !preview.HasIssues)
+                {
+                    EditorUtility.DisplayDialog("Rebuild Index", "No discrepancies found.", "OK");
+                    return;
+                }
+                var sb = new StringBuilder();
+                if (preview.HasChanges)
+                {
+                    sb.AppendLine("Detected changes:");
+                    foreach (var change in preview.changes)
+                    {
+                        sb.AppendLine($" • v{change.versionId:D3}: file {change.oldCount} → {change.newCount}, size {FormatSize(change.oldSize)} → {FormatSize(change.newSize)}");
+                    }
+                }
+                if (preview.HasIssues)
+                {
+                    if (preview.HasChanges) sb.AppendLine();
+                    sb.AppendLine("Issues:");
+                    foreach (var issue in preview.issues)
+                        sb.AppendLine($" • v{issue.versionId:D3}: {issue.message}");
+                }
+                sb.AppendLine();
+                sb.Append("Apply updates?");
+                if (EditorUtility.DisplayDialog("Rebuild Index", sb.ToString(), "Apply", "Cancel"))
+                {
+                    vm.RebuildIndex(applyChanges: true);
+                    _cachedVersions = null;
+                    EnsureVersionsCache();
+                    EditorUtility.DisplayDialog("Rebuild Index", "Index updated.", "OK");
+                }
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.DisplayDialog("Rebuild Index", "Operation failed:\n" + ex.Message, "OK");
+            }
+        }
+
         VersionInfo GetLatestVersionCached()
         {
             if (_cachedVersions == null || _cachedVersions.Count == 0) return null;
@@ -554,6 +725,12 @@ namespace AvatarSmartBackup
                 EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
             // Benchmark button only in advanced (moved below) keeps UI simpler
             EditorGUILayout.EndVertical();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Versioning", EditorStyles.boldLabel);
+            _settings.forceFullCheckpointEveryN = Mathf.Max(0, EditorGUILayout.IntField(new GUIContent("Force checkpoint every N incrementals", "0 = automatic policy (heuristic)."), _settings.forceFullCheckpointEveryN));
+            EditorGUILayout.LabelField(_settings.forceFullCheckpointEveryN <= 0 ? "Automatic policy: creates checkpoints when needed." : $"Creates a full checkpoint after {_settings.forceFullCheckpointEveryN} incremental versions.", EditorStyles.miniLabel);
+            _settings.showRebuildTool = EditorGUILayout.ToggleLeft(new GUIContent("Show rebuild index tool", "Enable manual rebuild of the versions index from the Versions tab."), _settings.showRebuildTool);
+            EditorGUILayout.EndVertical();
             // WHAT TO INCLUDE
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("What to include", EditorStyles.boldLabel);
@@ -614,7 +791,7 @@ namespace AvatarSmartBackup
             DrawTrackedSelectionSection();
             EditorGUILayout.EndVertical();
             EditorGUILayout.BeginVertical("box");
-            _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Diagnostics & utilities", "Abilita strumenti aggiuntivi (benchmark, log dettagliati)."), _settings.debugMode);
+            _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Diagnostics & utilities", "Enable additional tools (benchmark, detailed logs)."), _settings.debugMode);
             if (_settings.debugMode)
             {
                 EditorGUI.BeginChangeCheck();
@@ -868,7 +1045,7 @@ namespace AvatarSmartBackup
                 catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " - " + ex.Message); }
             }
             MainThread.Invoke(() => AssetDatabase.Refresh());
-            EditorUtility.DisplayDialog("Restore", "Restore completato.", "OK");
+            EditorUtility.DisplayDialog("Restore", "Restore completed.", "OK");
         }
         static string MakeRelTo(string p, string root)
         {
@@ -880,3 +1057,4 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+

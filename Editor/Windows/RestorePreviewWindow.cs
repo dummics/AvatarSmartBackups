@@ -48,6 +48,10 @@ namespace AvatarSmartBackup
     ConcurrentQueue<(int idx, DiffState state, long sizeVer, long sizeProj)> _scanResults = new ConcurrentQueue<(int, DiffState, long, long)>();
     bool _drainHookAdded = false;
     string _currentVersionRoot;
+    VersionInfo _versionInfo;
+    VersionDeltaMetadata _deltaMetadata;
+    string _resolvedSnapshotRoot;
+    string _snapshotWarning;
     // (HashCache disabled fallback) – se HashCache.cs non ancora compilato nell'ambiente, usiamo MD5 diretto.
 
     const string PREF_FOLD_SUMMARY = "ASB_Restore_Fold_Summary";
@@ -92,30 +96,64 @@ namespace AvatarSmartBackup
             _categoryMap.Clear();
             _categoriesOrdered.Clear();
             _md5Map = null;
-            string srcRoot = _versionId > 0 ? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
+            _versionInfo = null;
+            _deltaMetadata = null;
+            _resolvedSnapshotRoot = null;
+
+            string srcRoot;
+            if (_versionId > 0)
+            {
+                using var vmInfo = new FileBasedVersionManager();
+                _versionInfo = vmInfo.GetVersion(_versionId);
+                if (_versionInfo == null)
+                {
+                    EditorUtility.DisplayDialog("Restore", $"Version #{_versionId} not found.", "OK");
+                    return;
+                }
+                try
+                {
+                    srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
+                    _deltaMetadata = VersionRestoreService.LoadDeltaMetadata(_versionInfo) ?? new VersionDeltaMetadata();
+                    _snapshotWarning = VersionRestoreService.LastWarning;
+                }
+                catch (Exception ex)
+                {
+                    EditorUtility.DisplayDialog("Restore", $"Failed to prepare snapshot for version {_versionId}:\n{ex.Message}", "OK");
+                    return;
+                }
+            }
+            else
+            {
+                srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
+                _snapshotWarning = null;
+            }
             _currentVersionRoot = srcRoot;
+            _resolvedSnapshotRoot = srcRoot;
             if (!Directory.Exists(srcRoot)) return;
-            // Per la cartella Current richiediamo backup.ok. Per le versioni archiviate assumiamo già completate salvo file mancante.
-            var ok = Path.Combine(srcRoot, "backup.ok");
-            if (_versionId <= 0 && !File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
+            if (_versionId <= 0)
+            {
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
+            }
             int added = 0;
             void Enumerate(bool relaxed)
             {
                 foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
                 {
                     string rel = BackupManager.MakeRelTo(src, srcRoot).Replace("\\", "/");
+                    if (rel.StartsWith("delta/", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!relaxed && !rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
                     if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase) || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
                     _files.Add(rel);
                     _selected.Add(true);
                     _fileIndex[rel] = _files.Count - 1;
-    
+
                     // estensione count
                     string ext = Path.GetExtension(rel);
                     if (string.IsNullOrEmpty(ext)) ext = "(no ext)";
                     if (!_extCounts.ContainsKey(ext)) _extCounts[ext] = 0;
                     _extCounts[ext]++;
-    
+
                     // per .asset proviamo a riconoscere tipi comuni VRC
                     if (ext.Equals(".asset", StringComparison.OrdinalIgnoreCase))
                     {
@@ -149,8 +187,15 @@ namespace AvatarSmartBackup
         }
 
         // Carica il manifest.json (se esiste) ed estrae la mappa rel->md5 per uso nel diff
-        [Serializable] class ManifestEntryMini { public string relPath; public string md5; }
-        [Serializable] class BackupManifestMini { public List<ManifestEntryMini> entries; }
+        [Serializable] class ManifestEntryMini
+        {
+            public string relPath = string.Empty;
+            public string md5 = string.Empty;
+        }
+        [Serializable] class BackupManifestMini
+        {
+            public List<ManifestEntryMini> entries = new List<ManifestEntryMini>();
+        }
         void LoadManifestMd5(string root)
         {
             try
@@ -345,12 +390,25 @@ namespace AvatarSmartBackup
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             EditorGUILayout.LabelField($"Restore Preview {( _versionId>0?"v"+_versionId.ToString("D3"):"Current")}", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(new GUIContent("Open Folder","Apri cartella versione"), GUILayout.Width(100)))
+            if (GUILayout.Button(new GUIContent("Open Folder","Open version folder"), GUILayout.Width(100)))
             {
                 string root = _versionId>0? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
                 EditorUtility.RevealInFinder(root);
             }
             EditorGUILayout.EndHorizontal();
+            if (_versionInfo != null)
+            {
+                var infoMsg = _versionInfo.isCheckpoint
+                    ? "Full checkpoint: files are ready for direct restore."
+                    : $"Incremental version: automatically reconstructed from checkpoint #{_versionInfo.checkpointId}.";
+                var diffCount = _deltaMetadata?.changedEntries?.Count ?? _versionInfo.changedFileCount;
+                var removedCount = _deltaMetadata?.removedEntries?.Count ?? _versionInfo.removedFileCount;
+                if (diffCount > 0 || removedCount > 0)
+                    infoMsg += $"\nModifiche registrate: {diffCount} (rimossi: {removedCount}).";
+                if (!string.IsNullOrEmpty(_snapshotWarning))
+                    infoMsg += "\n" + _snapshotWarning;
+                EditorGUILayout.HelpBox(infoMsg, MessageType.Info);
+            }
 
             if (_isScanning)
             {
@@ -384,7 +442,7 @@ namespace AvatarSmartBackup
                 }
                 _lastFilter = _filter;
             }
-            EditorGUILayout.HelpBox("Scegli cosa ripristinare. Espandi le sezioni: Summary (panoramica), Filters, Selection, Files. Il backup di sicurezza si trova nella barra finale.", MessageType.Info);
+            EditorGUILayout.HelpBox("Choose what to restore. Expand sections: Summary, Filters, Selection, Files. The safety backup toggle is in the footer.", MessageType.Info);
 
             // SUMMARY FOLDOUT (FIRST)
             _foldSummary = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSummary, $"Summary");
@@ -397,7 +455,7 @@ namespace AvatarSmartBackup
                 DrawBigStat("CHANGED", changed.ToString(), new Color(0.95f,0.80f,0.35f,1f));
                 DrawBigStat("SAME", same.ToString(), new Color(0.55f,0.55f,0.55f,1f));
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button(new GUIContent("Restore ALL","Ripristina tutti i file"), GUILayout.Width(120), GUILayout.Height(28))) { SelectAllInternal(true); DoRestore(); }
+                if (GUILayout.Button(new GUIContent("Restore ALL","Restore all files"), GUILayout.Width(120), GUILayout.Height(28))) { SelectAllInternal(true); DoRestore(); }
                 EditorGUILayout.EndHorizontal();
                 if (_extCounts.Count > 0)
                 {
@@ -425,10 +483,10 @@ namespace AvatarSmartBackup
             if (_foldFilters)
             {
                 EditorGUILayout.BeginHorizontal();
-                bool newShowNew = GUILayout.Toggle(_showNew, new GUIContent("New","Mostra New"), "Button", GUILayout.Width(60));
-                bool newShowChanged = GUILayout.Toggle(_showChanged, new GUIContent("Changed","Mostra Changed"), "Button", GUILayout.Width(70));
-                bool newShowSame = GUILayout.Toggle(_showSame, new GUIContent("Same","Mostra Same"), "Button", GUILayout.Width(60));
-                bool newHideMeta = GUILayout.Toggle(_hideMeta, new GUIContent("Hide .meta","Nascondi .meta"), "Button", GUILayout.Width(80));
+                bool newShowNew = GUILayout.Toggle(_showNew, new GUIContent("New","Show New"), "Button", GUILayout.Width(60));
+                bool newShowChanged = GUILayout.Toggle(_showChanged, new GUIContent("Changed","Show Changed"), "Button", GUILayout.Width(70));
+                bool newShowSame = GUILayout.Toggle(_showSame, new GUIContent("Same","Show Same"), "Button", GUILayout.Width(60));
+                bool newHideMeta = GUILayout.Toggle(_hideMeta, new GUIContent("Hide .meta","Hide .meta"), "Button", GUILayout.Width(80));
                 if (newShowNew!=_showNew || newShowChanged!=_showChanged || newShowSame!=_showSame || newHideMeta!=_hideMeta)
                 { _showNew=newShowNew; _showChanged=newShowChanged; _showSame=newShowSame; _hideMeta=newHideMeta; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
                 if (GUILayout.Button("Reset", GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
@@ -548,7 +606,7 @@ namespace AvatarSmartBackup
                 }
                 EditorGUILayout.EndScrollView();
                 EditorGUILayout.LabelField($"Items: {totalVisible}    Selected: {totalSelectedVisible}", EditorStyles.miniLabel);
-                if (totalVisible==0) EditorGUILayout.HelpBox("Nessun file corrisponde ai filtri correnti.", MessageType.Info);
+                if (totalVisible==0) EditorGUILayout.HelpBox("No files match the current filters.", MessageType.Info);
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
 
@@ -557,10 +615,10 @@ namespace AvatarSmartBackup
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             if (GUILayout.Button("Cancel", GUILayout.Width(90))) { Close(); }
             GUILayout.FlexibleSpace();
-            _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent("Safety Backup","Crea copia PreRestore prima"), GUILayout.Width(110));
+            _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent("Safety Backup","Create PreRestore copy before restoring"), GUILayout.Width(110));
             int selectedCount = 0; long selectedSize = 0; for (int i=0;i<_diffInfos.Count;i++) if (_selected[i]) { selectedCount++; selectedSize += _diffInfos[i].size; }
             GUILayout.Label($"Selected: {selectedCount} files ({FormatSize(selectedSize)})", EditorStyles.miniLabel);
-            if (GUILayout.Button(new GUIContent("Restore Selected","Ripristina i file selezionati"), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
+            if (GUILayout.Button(new GUIContent("Restore Selected","Restore selected files"), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
             EditorGUILayout.EndHorizontal();
 
             // Shortcuts: Invio = restore (context aware), Esc = cancel
@@ -574,9 +632,37 @@ namespace AvatarSmartBackup
     
         void DoRestore()
         {
-            string srcRoot = _versionId > 0 ? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
-            if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "No Current/ backup found.", "OK"); return; }
+            string srcRoot;
+            if (_versionId > 0)
+            {
+                try
+                {
+                    srcRoot = _resolvedSnapshotRoot;
+                    if (string.IsNullOrEmpty(srcRoot) || !Directory.Exists(srcRoot))
+                    {
+                        srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
+                        _resolvedSnapshotRoot = srcRoot;
+                        _currentVersionRoot = srcRoot;
+                        _snapshotWarning = VersionRestoreService.LastWarning;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    EditorUtility.DisplayDialog("Restore", $"Failed to prepare version data: \n{ex.Message}", "OK");
+                    return;
+                }
+            }
+            else
+            {
+                srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
+                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "No Current/ backup found.", "OK"); return; }
+                var ok = Path.Combine(srcRoot, "backup.ok");
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
+                _snapshotWarning = null;
+            }
+            if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "Version files not found.", "OK"); return; }
     
+            _currentVersionRoot = srcRoot;
             // Se richiesto, fai backup corrente degli Assets prima di sovrascrivere
             if (_backupBefore)
             {
@@ -647,6 +733,20 @@ namespace AvatarSmartBackup
 
         void RequestRescan()
         {
+            if (_versionId > 0)
+            {
+                try
+                {
+                    _resolvedSnapshotRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: true);
+                    _currentVersionRoot = _resolvedSnapshotRoot;
+                    _snapshotWarning = VersionRestoreService.LastWarning;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Restore rescan failed: " + ex.Message);
+                    return;
+                }
+            }
             if (_isScanning) return; // evitiamo sovrapposizioni
             if (string.IsNullOrEmpty(_currentVersionRoot) || !System.IO.Directory.Exists(_currentVersionRoot)) return;
             StartAsyncScan(_currentVersionRoot);

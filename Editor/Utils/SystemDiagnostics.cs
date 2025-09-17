@@ -31,7 +31,7 @@ namespace AvatarSmartBackup
                     EditorUtility.DisplayDialog("Versioning Test", "No Current/ backup yet. Run a backup first.", "OK");
                     return;
                 }
-                bool ok = vm.CreateVersion("Test manual version", current);
+                bool ok = vm.CreateVersion("Test manual version", current, settings, forceCheckpoint: true);
                 var list = vm.GetVersions();
                 EditorUtility.DisplayDialog("Versioning Test", ok
                     ? $"✅ Created test version. Total versions: {list.Count}" 

@@ -52,7 +52,7 @@ namespace AvatarSmartBackup
                 RefreshVersions();
             }
             EditorGUILayout.EndHorizontal();
-            EditorGUILayout.HelpBox("Each version represents a complete restore point. Click 'Restore' to revert your project to that exact state.", MessageType.Info);
+            EditorGUILayout.HelpBox("Versions can be full checkpoints or incrementals. Incremental versions are automatically reconstructed from the nearest checkpoint.", MessageType.Info);
             // Status
             if (_isLoading)
             {
