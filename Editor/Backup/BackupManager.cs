@@ -51,6 +51,9 @@ namespace AvatarSmartBackup
                 s = JsonUtility.FromJson<BackupSettings>(File.ReadAllText(GlobalSettingsPath, Encoding.UTF8));
             else s = new BackupSettings();
             s.useProjectSettings = UseProjectSettings;
+            if (s.AdvancedMode && !s.debugMode) s.debugMode = true;
+            if (s.debugMode && !s.advancedMode) s.AdvancedMode = true;
+            else s.debugMode = s.AdvancedMode;
             if (s.idleDelaySeconds <= 0) s.idleDelaySeconds = 10;
             if (s.lastMeasuredMBps < 0f) s.lastMeasuredMBps = 0f;
             if (s.lastBackupBytes < 0) s.lastBackupBytes = 0;
@@ -69,6 +72,8 @@ namespace AvatarSmartBackup
             try
             {
                 UseProjectSettings = s.useProjectSettings;
+                s.debugMode = s.AdvancedMode;
+                s.advancedMode = s.AdvancedMode;
                 string p = s.useProjectSettings ? ProjectSettingsPath : GlobalSettingsPath;
                 Directory.CreateDirectory(Path.GetDirectoryName(p));
                 File.WriteAllText(p, JsonUtility.ToJson(s, true), Encoding.UTF8);
@@ -218,7 +223,7 @@ namespace AvatarSmartBackup
 
             var inc = IncrementalCollector.ConsumeChanges()?.ToArray() ?? Array.Empty<string>();
             bool haveIncremental = inc.Length > 0;
-            if (haveIncremental && s?.debugMode == true)
+            if (haveIncremental && s?.AdvancedMode == true)
             {
                 Log.Info($"IncrementalCollector: {inc.Length} changes consumed");
             }
@@ -270,7 +275,7 @@ namespace AvatarSmartBackup
             if (haveIncremental && prev == null)
                 haveIncremental = false;
 
-            if (s?.debugMode == true)
+            if (s?.AdvancedMode == true)
             {
                 Log.Info($"BuildCopyPlan: scanner produced {scanResults.Count} entries");
             }
@@ -463,7 +468,7 @@ namespace AvatarSmartBackup
                 }
             }
 
-            if (s?.debugMode == true)
+            if (s?.AdvancedMode == true)
             {
                 Log.Info($"BuildCopyPlan: planned copyJobs={copyJobs.Count} copied={copied} skipped={skipped} totalEntries={manifest.entries.Count} totalBytes={totalBytes}");
             }
@@ -563,15 +568,15 @@ namespace AvatarSmartBackup
                 int zipCap = EffectiveZipMBps(s);
                 if (copyCap > 0) Log.Info($"Copy throttle: {copyCap} MB/s{(s.autoThrottle ? " (auto)" : string.Empty)}");
                 if (zipCap > 0) Log.Info($"Zip throttle: {zipCap} MB/s{(s.autoThrottle ? " (auto)" : string.Empty)}");
-                double intervalSec = s.debugMode ? s.intervalMinutes : s.intervalMinutes * 60;
-                if (!s.debugMode && s.intervalMinutes < 5)
+                double intervalSec = s.AdvancedMode ? s.intervalMinutes : s.intervalMinutes * 60;
+                if (!s.AdvancedMode && s.intervalMinutes < 5)
                     Log.Warn("Backup interval under 5 minutes may affect editor performance.");
                 if (s.lastBackupBytes > 0 && copyCap > 0)
                 {
                     double secNeeded = s.lastBackupBytes / (copyCap * 1024.0 * 1024.0);
                     if (secNeeded > intervalSec)
                     {
-                        string unit = s.debugMode ? "sec" : "min";
+                        string unit = s.AdvancedMode ? "sec" : "min";
                         Log.Warn($"Estimated throughput may not finish backup ({HumanMB(s.lastBackupBytes)}) within {s.intervalMinutes} {unit}.");
                     }
                 }
@@ -862,14 +867,14 @@ namespace AvatarSmartBackup
                     // no-op placeholder to access newMan in debug
                 }
             }
-            // Log pruning activity in debug mode
+            // Log pruning activity in advanced mode
             if (newMan != null && newMan.entries != null && newMan.entries.Count >= 0)
             {
-                // If debug mode is enabled in settings, try to read it and log
+                // If advanced mode is enabled in settings, try to read it and log
                 try
                 {
                     var s = LoadSettings();
-                    if (s?.debugMode == true)
+                    if (s?.AdvancedMode == true)
                     {
                         Log.Info($"PruneRemoved: pruned files={pruned}");
                     }

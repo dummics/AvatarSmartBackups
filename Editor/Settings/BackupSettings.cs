@@ -9,6 +9,7 @@ namespace AvatarSmartBackup
     {
         public bool autoRunOnLoad = true;
         public int intervalMinutes = 10;
+        public bool advancedMode = false;
         public bool debugMode = false;
         public int keepSnapshots = 3;
         public bool backupOnPlayEnter = true;
@@ -51,15 +52,25 @@ namespace AvatarSmartBackup
         public bool showAdvanced = false;
         public bool useProjectSettings = false;
         
-        // Debug-only options
-        public bool enableDebugLogging = false;        // Detailed logging to file (debug mode only)
+        // Advanced-only options
+        public bool enableDebugLogging = false;        // Detailed logging to file (advanced mode only)
 
         // Cooldowns and anti-spam (seconds)
-        // Reasonable defaults that work automatically - exposed only in debug mode for advanced users
+        // Reasonable defaults that work automatically - exposed only in advanced mode for power users
         public int manualSnapshotCooldownSeconds = 30;   // Longer default to prevent accidental spam
         public int manualBenchmarkCooldownSeconds = 60;  // Longer to avoid repeated disk stress
         public int minManualBackupIntervalSeconds = 120; // 2 minutes minimum for manual backups        // Extension scoping: extensions (e.g., .prefab) from Folders & Types apply only within included folders when enabled
         public bool extWithinIncludeFolders = true;
+
+        public bool AdvancedMode
+        {
+            get => advancedMode || debugMode;
+            set
+            {
+                advancedMode = value;
+                debugMode = value;
+            }
+        }
 
     // UI state (non critico, serializzato con settings)
     public int _activeTab = 0;              // 0 = Backup, 1 = Versions

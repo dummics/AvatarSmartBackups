@@ -27,7 +27,7 @@ namespace AvatarSmartBackup
             }
             if (exts.Count == 0)
             {
-                if (s?.debugMode == true) Log.Info("AdditionalExtensionsCollector: no extension patterns found in includeFolders");
+                if (s?.AdvancedMode == true) Log.Info("AdditionalExtensionsCollector: no extension patterns found in includeFolders");
                 yield break;
             }
             string root = Path.Combine(FileUtilEx.ProjectRoot, "Assets");

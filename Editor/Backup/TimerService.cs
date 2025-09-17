@@ -37,7 +37,7 @@ namespace AvatarSmartBackup
         static TimeSpan GetInterval(BackupSettings s)
         {
             double v = Math.Max(1, s.intervalMinutes);
-            return s.debugMode ? TimeSpan.FromSeconds(v) : TimeSpan.FromMinutes(v);
+            return s.AdvancedMode ? TimeSpan.FromSeconds(v) : TimeSpan.FromMinutes(v);
         }
 
         public static void StartTimerIfNeeded(BackupSettings s)

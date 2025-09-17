@@ -88,113 +88,156 @@ namespace AvatarSmartBackup
     void DrawBackupTab()
     {
         EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
-    EditorGUILayout.HelpBox("Automatic safety copies in background. Usa 'Backup Now' per forzare (throttle applicato).", MessageType.Info);
+        EditorGUILayout.HelpBox("Automatic safety copies in background. Usa 'Backup Now' per forzare (throttle applicato).", MessageType.Info);
 
-        // Control block
+        DrawSchedulerSection();
+        DrawPrimaryActions();
+
+        EditorGUILayout.Space();
+        bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent("Advanced Mode", "Mostra opzioni avanzate (filtri, performance, verify, retention)."), _settings.AdvancedMode);
+        if (newAdvanced != _settings.AdvancedMode)
+        {
+            _settings.AdvancedMode = newAdvanced;
+            TimerService.InvalidateSettingsCache();
+        }
+
+        if (_settings.AdvancedMode)
+        {
+            DrawAdvancedOverview();
+            DrawAdvancedSettings();
+        }
+    }
+
+    void DrawSchedulerSection()
+    {
         EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("Backup Control", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Automatic Backups", EditorStyles.boldLabel);
 
-        // Centered big toggle + interval
-        GUILayout.BeginHorizontal(); GUILayout.FlexibleSpace();
+        GUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
         bool running = Session.IsRunning;
         Color prev = GUI.backgroundColor;
-        GUI.backgroundColor = running ? new Color(0.25f,0.55f,0.25f,1f) : new Color(0.45f,0.2f,0.2f,1f);
+        GUI.backgroundColor = running ? new Color(0.25f, 0.55f, 0.25f, 1f) : new Color(0.45f, 0.2f, 0.2f, 1f);
         if (GUILayout.Button(new GUIContent(running ? "Automatic Backups: ON" : "Automatic Backups: OFF", "Toggle background backup scheduler"), GUILayout.Width(220), GUILayout.Height(30)))
         {
-            if (running) TimerService.PauseTimer(); else TimerService.StartTimerIfNeeded(_settings);
+            if (running) TimerService.PauseTimer();
+            else TimerService.StartTimerIfNeeded(_settings);
         }
         GUI.backgroundColor = prev;
-        GUILayout.FlexibleSpace(); GUILayout.EndHorizontal();
+        GUILayout.FlexibleSpace();
+        GUILayout.EndHorizontal();
 
-        GUILayout.Space(4);
-        EditorGUILayout.BeginHorizontal();
-        string lbl = _settings.debugMode ? "Interval (s)" : "Interval (min)";
-            EditorGUILayout.LabelField(lbl, GUILayout.Width(110));
-            int maxInt = _settings.debugMode ? 119 : 240;
-            _settings.intervalMinutes = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, maxInt);
+        EditorGUILayout.Space(2);
+        EditorGUILayout.LabelField($"Next: {Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--"}    Last: {Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "never"}");
+
+        if (_settings.AdvancedMode)
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Interval (s)", GUILayout.Width(110));
+            int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, 119);
+            if (newInterval != _settings.intervalMinutes)
+                _settings.intervalMinutes = newInterval;
             EditorGUILayout.EndHorizontal();
-            
-            EditorGUILayout.LabelField($"Next: {Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--"}    Last: {Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "never"}");
-            
-            bool warnInterval = !_settings.debugMode && _settings.intervalMinutes < 5;
+
             int effCopy = BackupManager.EffectiveCopyMBps(_settings);
-            bool warnSpeed = false;
-            double secNeeded = 0;
-            double intervalSec = _settings.debugMode ? _settings.intervalMinutes : _settings.intervalMinutes * 60;
             if (_settings.lastBackupBytes > 0 && effCopy > 0)
             {
-                secNeeded = _settings.lastBackupBytes / (effCopy * 1024.0 * 1024.0);
-                warnSpeed = secNeeded > intervalSec;
+                double secNeeded = _settings.lastBackupBytes / (effCopy * 1024.0 * 1024.0);
+                if (secNeeded > _settings.intervalMinutes)
+                {
+                    double minutesNeeded = secNeeded / 60.0;
+                    double mb = _settings.lastBackupBytes / (1024.0 * 1024.0);
+                    EditorGUILayout.HelpBox($"At {effCopy} MB/s, backing up {mb:0.0} MB takes ~{minutesNeeded:0.0} min, exceeding the interval.", MessageType.Warning);
+                }
             }
-            if (warnInterval)
-                EditorGUILayout.HelpBox("Intervals under 5 minutes may impact editor performance.", MessageType.Warning);
-            if (warnSpeed)
-            {
-                double minutesNeeded = secNeeded / 60.0;
-                double mb = _settings.lastBackupBytes / (1024.0 * 1024.0);
-                EditorGUILayout.HelpBox($"At {effCopy} MB/s, backing up {mb:0.0} MB takes ~{minutesNeeded:0.0} min, exceeding the interval.", MessageType.Warning);
-            }
-            EditorGUILayout.EndVertical();
+        }
+        else
+        {
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField($"Interval: {_settings.intervalMinutes} min (Advanced Mode per modificare)", EditorStyles.miniLabel);
+        }
 
-            // Actions (simplified ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ manual operations mostly in debug)
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Manual / Tools", EditorStyles.boldLabel);
-            const double BackupManualCooldownSeconds = 30; // min intervallo manuale
-            if (!_settings.debugMode)
-            {
-                // In modalitÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  normale mostriamo sempre il pulsante ma con throttle
-                bool canManual = true;
-                string tooltip = "Esegui subito un backup (cooldown 30s)";
-                double now = EditorApplication.timeSinceStartup;
-                if (_lastManualRunTime > 0 && now - _lastManualRunTime < BackupManualCooldownSeconds)
-                {
-                    canManual = false;
-                    double rem = BackupManualCooldownSeconds - (now - _lastManualRunTime);
-                    tooltip = $"Attendi {rem:0}s prima di un altro backup manuale";
-                }
-                using (new EditorGUI.DisabledScope(!canManual || BackupManager.IsBusy))
-                {
-                    if (GUILayout.Button(new GUIContent("Backup Now", tooltip)))
-                    {
-                        _lastManualRunTime = now;
-                        BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
-                    }
-                }
-            }
-            else
-            {
-                // In debug nessun throttle (si puÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â² usare per test performance)
-                using (new EditorGUI.DisabledScope(BackupManager.IsBusy))
-                {
-                    if (GUILayout.Button(new GUIContent("Backup Now", "Force a backup immediately (debug mode)")))
-                        BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
-                }
-            }
-            // Last version quick summary + button to switch to Versions tab
-            var latest = GetLatestVersionCached();
-            if (latest != null)
-            {
-                EditorGUILayout.Space(4);
-                EditorGUILayout.LabelField("Latest Version:", EditorStyles.miniBoldLabel);
-                EditorGUILayout.LabelField($"# {latest.id}  {latest.description}", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField($"Files: {latest.fileCount}  Size: {FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
-                if (GUILayout.Button(new GUIContent("Go to Versions", "Open Versions tab"), GUILayout.Width(140)))
-                {
-                    _settings._activeTab = 1;
-                }
-            }
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the folder where backups are stored."))) 
-                EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
-            if (GUILayout.Button(new GUIContent("Open Log Folder", "Open the folder containing detailed log files for troubleshooting.")))
-            {
-                string logDir = Log.GetLogDirectory();
-                if (Directory.Exists(logDir)) EditorUtility.RevealInFinder(logDir); else EditorUtility.DisplayDialog("Log Folder", "Log folder not found.", "OK");
-            }
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.EndVertical();
+        EditorGUILayout.EndVertical();
+    }
 
-    DrawAdvancedSettings();
+    void DrawPrimaryActions()
+    {
+        const double BackupManualCooldownSeconds = 30;
+        double now = EditorApplication.timeSinceStartup;
+        bool throttle = !_settings.AdvancedMode;
+        bool canManual = true;
+        string tooltip = "Esegui subito un backup (cooldown 30s)";
+        if (throttle && _lastManualRunTime > 0 && now - _lastManualRunTime < BackupManualCooldownSeconds)
+        {
+            canManual = false;
+            double rem = BackupManualCooldownSeconds - (now - _lastManualRunTime);
+            tooltip = $"Attendi {rem:0}s prima di un altro backup manuale";
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        using (new EditorGUI.DisabledScope(!canManual || BackupManager.IsBusy))
+        {
+            string backupTooltip = _settings.AdvancedMode ? "Esegui subito un backup (nessun cooldown in Advanced Mode)" : tooltip;
+            if (GUILayout.Button(new GUIContent("Backup Now", backupTooltip)))
+            {
+                _lastManualRunTime = now;
+                BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
+            }
+        }
+
+        EnsureVersionsCache();
+        var latest = GetLatestVersionCached();
+        using (new EditorGUI.DisabledScope(latest == null))
+        {
+            string restoreTooltip = latest == null ? "Nessuna versione disponibile" : "Apri la versione più recente per ripristinare o ispezionare";
+            if (GUILayout.Button(new GUIContent("Preview & Restore latest", restoreTooltip)))
+            {
+                if (latest != null)
+                    RestorePreviewWindow.Open(latest.id);
+            }
+        }
+
+        if (GUILayout.Button(new GUIContent("Open Backup Folder", "Apri la cartella dei backup")))
+        {
+            EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
+        }
+        EditorGUILayout.EndHorizontal();
+    }
+
+    void DrawAdvancedOverview()
+    {
+        EditorGUILayout.BeginVertical("box");
+        EditorGUILayout.LabelField("Advanced Tools", EditorStyles.boldLabel);
+
+        EnsureVersionsCache();
+        var latest = GetLatestVersionCached();
+        if (latest != null)
+        {
+            EditorGUILayout.LabelField("Latest Version:", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField($"# {latest.id}  {latest.description}", EditorStyles.miniLabel);
+            EditorGUILayout.LabelField($"Files: {latest.fileCount}  Size: {FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
+            if (GUILayout.Button(new GUIContent("Go to Versions", "Open Versions tab"), GUILayout.Width(140)))
+            {
+                _settings._activeTab = 1;
+            }
+        }
+
+        EditorGUILayout.BeginHorizontal();
+        if (GUILayout.Button(new GUIContent("Open Log Folder", "Apri la cartella dei log per assistenza"), GUILayout.Width(150)))
+        {
+            string logDir = Log.GetLogDirectory();
+            if (Directory.Exists(logDir)) EditorUtility.RevealInFinder(logDir);
+            else EditorUtility.DisplayDialog("Log Folder", "Log folder not found.", "OK");
+        }
+        if (GUILayout.Button(new GUIContent("Refresh Versions", "Ricarica l'elenco delle versioni"), GUILayout.Width(150)))
+        {
+            _cachedVersions = null;
+            EnsureVersionsCache();
+        }
+        EditorGUILayout.EndHorizontal();
+
+        EditorGUILayout.EndVertical();
     }
 
     void DrawVersionsTab()
@@ -210,7 +253,7 @@ namespace AvatarSmartBackup
         // Toolbar line
         EditorGUILayout.BeginHorizontal();
         if (GUILayout.Button(new GUIContent("Refresh", "Reload versions from disk"), GUILayout.Width(70))) _cachedVersions = null;
-        if (_settings.debugMode)
+        if (_settings.AdvancedMode)
         {
             GUI.enabled = !BackupManager.IsBusy;
             bool allowManualVersion = CanCreateManualVersion(out string reasonBlock);
@@ -392,7 +435,7 @@ namespace AvatarSmartBackup
     bool CanCreateManualVersion(out string reason)
     {
         reason = string.Empty;
-        if (!_settings.debugMode && _cachedVersions != null && _cachedVersions.Count > 0)
+        if (!_settings.AdvancedMode && _cachedVersions != null && _cachedVersions.Count > 0)
         { reason = "Manual versions only in Debug (auto after backup)"; return false; }
         string currentDir = Path.Combine(FileUtilEx.BackupRoot, "Current");
         if (!Directory.Exists(currentDir)) { reason = "No Current backup yet"; return false; }
@@ -434,12 +477,13 @@ namespace AvatarSmartBackup
 
     void DrawAdvancedSettings()
     {
+        if (!_settings.AdvancedMode) return;
         EditorGUILayout.Space(10);
         _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, "Advanced Settings");
         if (!_settings.showAdvanced) return;
 
         // ZIP POLICY
-        if (_settings.debugMode) // show snapshot policy only in debug to declutter normal UX
+        if (_settings.AdvancedMode) // show snapshot policy only in advanced to declutter normal UX
         {
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.BeginHorizontal();
@@ -465,9 +509,9 @@ namespace AvatarSmartBackup
         _settings.autoThrottle = EditorGUILayout.ToggleLeft(new GUIContent("Auto throttle (recommended)", "Automatically caps IO speed to keep the editor responsive."), _settings.autoThrottle);
         _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Max parallel threads", "Number of concurrent copy/hash tasks."), _settings.maxParallelThreads), 1, Math.Max(1, System.Environment.ProcessorCount));
         _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
-        if (_settings.debugMode && _settings.lastMeasuredMBps > 0f)
+        if (_settings.AdvancedMode && _settings.lastMeasuredMBps > 0f)
             EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
-        // Benchmark button only in debug (moved below) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ keeps UI simpler
+        // Benchmark button only in advanced (moved below) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ keeps UI simpler
         EditorGUILayout.EndVertical();
 
         // WHAT TO INCLUDE
@@ -531,39 +575,34 @@ namespace AvatarSmartBackup
         DrawTrackedSelectionSection();
         EditorGUILayout.EndVertical();
 
-        // DEBUG (only when debug mode enabled toggle lives here)
         EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("Debug", EditorStyles.boldLabel);
-        _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Debug mode", "Enable second-based intervals and extra debug options."), _settings.debugMode);
-        if (_settings.debugMode)
+        EditorGUILayout.LabelField("Diagnostics & Utilities", EditorStyles.boldLabel);
+        EditorGUI.BeginChangeCheck();
+        bool useGlobal = !_settings.useProjectSettings;
+        bool newUseGlobal = EditorGUILayout.ToggleLeft(new GUIContent("Use global settings", "Use global settings instead of project-local ones."), useGlobal);
+        if (EditorGUI.EndChangeCheck())
         {
-            EditorGUI.BeginChangeCheck();
-            bool useGlobal = !_settings.useProjectSettings;
-            bool newUseGlobal = EditorGUILayout.ToggleLeft(new GUIContent("Use global settings", "Use global settings instead of project-local ones."), useGlobal);
-            if (EditorGUI.EndChangeCheck())
-            {
-                _settings.useProjectSettings = !newUseGlobal;
-                BackupManager.SaveSettings(_settings);
-                TimerService.InvalidateSettingsCache();
-                _settings = BackupManager.LoadSettings();
-            }
-            if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150))) _ = BackupManager.RunManualBenchmarkAsync(_settings);
-            EditorGUILayout.Space(6);
-            EditorGUILayout.LabelField("Anti-spam cooldowns", EditorStyles.boldLabel);
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(new GUIContent("Snapshot cooldown (s)", "Minimum seconds between manual snapshots."), GUILayout.Width(160));
-            _settings.manualSnapshotCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualSnapshotCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(new GUIContent("Benchmark cooldown (s)", "Minimum seconds between manual benchmark runs."), GUILayout.Width(160));
-            _settings.manualBenchmarkCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualBenchmarkCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(new GUIContent("Min backup interval (s)", "Minimum seconds between manual backup requests."), GUILayout.Width(160));
-            _settings.minManualBackupIntervalSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.minManualBackupIntervalSeconds, GUILayout.Width(60)), 1, 3600);
-            EditorGUILayout.EndHorizontal();
-            _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(new GUIContent("Detailed file logging", "Enable detailed logging to file for troubleshooting."), _settings.enableDebugLogging);
+            _settings.useProjectSettings = !newUseGlobal;
+            BackupManager.SaveSettings(_settings);
+            TimerService.InvalidateSettingsCache();
+            _settings = BackupManager.LoadSettings();
         }
+        if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150))) _ = BackupManager.RunManualBenchmarkAsync(_settings);
+        EditorGUILayout.Space(6);
+        EditorGUILayout.LabelField("Anti-spam cooldowns", EditorStyles.boldLabel);
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(new GUIContent("Snapshot cooldown (s)", "Minimum seconds between manual snapshots."), GUILayout.Width(160));
+        _settings.manualSnapshotCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualSnapshotCooldownSeconds, GUILayout.Width(60)), 1, 3600);
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(new GUIContent("Benchmark cooldown (s)", "Minimum seconds between manual benchmark runs."), GUILayout.Width(160));
+        _settings.manualBenchmarkCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualBenchmarkCooldownSeconds, GUILayout.Width(60)), 1, 3600);
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.LabelField(new GUIContent("Min backup interval (s)", "Minimum seconds between manual backup requests."), GUILayout.Width(160));
+        _settings.minManualBackupIntervalSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.minManualBackupIntervalSeconds, GUILayout.Width(60)), 1, 3600);
+        EditorGUILayout.EndHorizontal();
+        _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(new GUIContent("Detailed file logging", "Enable detailed logging to file for troubleshooting."), _settings.enableDebugLogging);
         EditorGUILayout.EndVertical();
     }
     
