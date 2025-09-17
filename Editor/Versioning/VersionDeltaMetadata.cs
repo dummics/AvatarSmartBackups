@@ -28,6 +28,7 @@ namespace AvatarSmartBackup
         public long size;
         public string hash;
         public string category;
+        public bool isNew;
     }
 
     [Serializable]
@@ -47,3 +48,4 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+

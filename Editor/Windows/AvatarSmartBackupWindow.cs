@@ -552,6 +552,38 @@ namespace AvatarSmartBackup
             return $"Changes: {info.changedFileCount}  Removed: {info.removedFileCount}  Delta: {delta}";
         }
 
+        void DrawVersionBadges(VersionInfo info)
+        {
+            if (info == null) return;
+            EditorGUILayout.BeginHorizontal();
+            DrawBadge(info.isCheckpoint ? BadgeColorCheckpoint : BadgeColorIncremental, info.isCheckpoint ? AvatarSmartBackup.Localization.L.T("vc.badge.checkpoint", "Checkpoint") : AvatarSmartBackup.Localization.L.T("vc.badge.incremental", "Incremental"));
+            if (info.changedFileCount > 0)
+                DrawBadge(BadgeColorChanged, string.Format(AvatarSmartBackup.Localization.L.T("vc.badge.changed", "Changed: {0}"), info.changedFileCount));
+            if (info.removedFileCount > 0)
+                DrawBadge(BadgeColorRemoved, string.Format(AvatarSmartBackup.Localization.L.T("vc.badge.removed", "Removed: {0}"), info.removedFileCount));
+            EditorGUILayout.EndHorizontal();
+        }
+
+        void DrawBadge(Color tint, string text)
+        {
+            Rect rect = GUILayoutUtility.GetRect(BadgeWidth, 20f, BadgeStyle, GUILayout.MaxWidth(BadgeWidth));
+            EditorGUI.DrawRect(rect, tint);
+            var labelRect = new Rect(rect.x + 6, rect.y + 2, rect.width - 12, rect.height - 4);
+            GUI.Label(labelRect, text, BadgeStyle);
+        }
+
+        static GUIStyle BadgeStyle
+        {
+            get
+            {
+                if (_badgeStyle == null)
+                {
+                    _badgeStyle = new GUIStyle(EditorStyles.miniBoldLabel) { alignment = TextAnchor.MiddleCenter };
+                }
+                return _badgeStyle;
+            }
+        }
+
         string BuildVersionTypeSummary(VersionInfo info)
         {
             if (info == null) return "Type: --";
@@ -615,10 +647,9 @@ namespace AvatarSmartBackup
 
                 Log.Warn("Version diff summary failed: " + ex.Message);
 
-                var message = string.Format(L.T("vc.error.body", "Unable to read changes:
-{0}"), ex.Message);
+                var message = string.Format(AvatarSmartBackup.Localization.L.T("vc.error.body", "Unable to read changes:\n{0}"), ex.Message);
 
-                EditorUtility.DisplayDialog(L.T("vc.error.title", "Show changes"), message, "OK");
+                EditorUtility.DisplayDialog(AvatarSmartBackup.Localization.L.T("vc.error.title", "Show changes"), message, "OK");
 
             }
 
@@ -1096,5 +1127,14 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+
+
+
+
+
+
+
+
+
 
 

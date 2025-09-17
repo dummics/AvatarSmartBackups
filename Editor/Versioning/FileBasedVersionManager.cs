@@ -439,15 +439,17 @@ namespace AvatarSmartBackup
             long changedBytes = 0;
             var categoryMap = new Dictionary<string, (int count, long bytes)>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var entry in diff.Added.Concat(diff.Modified))
+            void AddChange(ManifestEntry entry, bool isNew)
             {
+                if (entry == null || string.IsNullOrEmpty(entry.relPath)) return;
                 string category = Categorize(entry.relPath);
                 var deltaEntry = new VersionDeltaEntry
                 {
                     relPath = entry.relPath,
                     size = Math.Max(0, entry.size),
                     hash = entry.md5,
-                    category = category
+                    category = category,
+                    isNew = isNew
                 };
                 metadata.changedEntries.Add(deltaEntry);
                 changedBytes += Math.Max(0, entry.size);
@@ -457,6 +459,9 @@ namespace AvatarSmartBackup
                 else
                     categoryMap[category] = (agg.count + 1, agg.bytes + Math.Max(0, entry.size));
             }
+
+            foreach (var entry in diff.Added) AddChange(entry, true);
+            foreach (var entry in diff.Modified) AddChange(entry, false);
 
             long removedBytes = 0;
             foreach (var removed in diff.Removed)

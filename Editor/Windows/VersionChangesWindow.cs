@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -282,8 +283,22 @@ namespace AvatarSmartBackup
 
         static string Categorize(string path)
         {
-            if (string.IsNullOrEmpty(path)) return string.Empty;
-            return VersionRestoreService.CategorizePath(path);
+            if (string.IsNullOrEmpty(path)) return "Other";
+            string ext = Path.GetExtension(path).ToLowerInvariant();
+            switch (ext)
+            {
+                case ".controller": return "Controller";
+                case ".anim": return "Anim";
+                case ".animator": return "Anim";
+                case ".playable": return "Controller";
+                case ".mat": return "Material";
+                case ".shader": return "Shader";
+                case ".prefab": return "Prefab";
+                case ".unity": return "Scene";
+                case ".asset":
+                    return path.IndexOf("VRCExpression", StringComparison.OrdinalIgnoreCase) >= 0 ? "VRC Assets" : "Asset";
+                default: return "Other";
+            }
         }
 
         static string FormatSize(long bytes)
@@ -357,4 +372,8 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+
+
+
+
 

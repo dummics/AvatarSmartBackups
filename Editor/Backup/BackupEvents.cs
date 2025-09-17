@@ -3,7 +3,7 @@ using System;
 
 namespace AvatarSmartBackup
 {
-    internal readonly struct BackupRunSummary
+    public readonly struct BackupRunSummary
     {
         public readonly bool Success;
         public readonly string Reason;
@@ -39,3 +39,4 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+
