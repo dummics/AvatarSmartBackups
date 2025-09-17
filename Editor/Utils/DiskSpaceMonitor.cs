@@ -4,7 +4,6 @@ using System.IO;
 using System.Text;
 using UnityEngine;
 using UnityEditor;
-
 namespace AvatarSmartBackup
 {
     internal enum DiskSpaceStatus
@@ -15,14 +14,12 @@ namespace AvatarSmartBackup
         Critical,
         Error
     }
-
     internal enum DiskSpaceStage
     {
         PreCheck,
         PlanEstimate,
         PostBackup
     }
-
     internal struct DiskSpaceSnapshot
     {
         public string driveName;
@@ -31,7 +28,6 @@ namespace AvatarSmartBackup
         public long backupSizeBytes;
         public DateTime capturedAtUtc;
     }
-
     internal struct DiskSpaceReport
     {
         public DiskSpaceStatus Status;
@@ -41,7 +37,6 @@ namespace AvatarSmartBackup
         public bool BlockBackup;
         public DiskSpaceStage Stage;
     }
-
     internal static class DiskSpaceMonitor
     {
         const long BytesPerMB = 1024L * 1024L;
@@ -51,7 +46,6 @@ namespace AvatarSmartBackup
         static long _lastBackupSizeBytes;
         static DateTime _lastBackupSizeTimestampUtc;
         static readonly TimeSpan SizeCacheDuration = TimeSpan.FromMinutes(5);
-
         public static DiskSpaceReport LastReport
         {
             get
@@ -59,7 +53,6 @@ namespace AvatarSmartBackup
                 lock (_lock) return _lastReport;
             }
         }
-
         public static DiskSpaceReport Check(BackupSettings settings, long requiredBytes, DiskSpaceStage stage)
         {
             if (settings == null || !settings.diskSpaceProtection)
@@ -74,7 +67,6 @@ namespace AvatarSmartBackup
                     Stage = stage
                 });
             }
-
             try
             {
                 var snapshot = CaptureSnapshot();
@@ -90,7 +82,6 @@ namespace AvatarSmartBackup
                         Stage = stage
                     });
                 }
-
                 long warningAbs = Math.Max(0, settings.diskWarningFreeMB * BytesPerMB);
                 long criticalAbs = Math.Max(0, settings.diskCriticalFreeMB * BytesPerMB);
                 long warningPercent = settings.diskWarningFreePercent > 0
@@ -99,22 +90,18 @@ namespace AvatarSmartBackup
                 long criticalPercent = settings.diskCriticalFreePercent > 0
                     ? (long)(snapshot.totalBytes * settings.diskCriticalFreePercent)
                     : 0;
-
                 long warningThreshold = Math.Max(warningAbs, warningPercent);
                 long criticalThreshold = Math.Max(criticalAbs, criticalPercent);
                 long bufferBytes = Math.Max(0, settings.diskPreBackupBufferMB * BytesPerMB);
                 long projectedFree = snapshot.freeBytes - Math.Max(0, requiredBytes) - bufferBytes;
                 if (projectedFree < 0) projectedFree = 0;
-
                 bool criticalNow = criticalThreshold > 0 && snapshot.freeBytes <= criticalThreshold;
                 bool warningNow = warningThreshold > 0 && snapshot.freeBytes <= warningThreshold;
                 bool criticalPredicted = criticalThreshold > 0 && projectedFree <= criticalThreshold;
                 bool warningPredicted = warningThreshold > 0 && projectedFree <= warningThreshold;
-
                 var status = DiskSpaceStatus.Ok;
                 if (criticalNow || criticalPredicted) status = DiskSpaceStatus.Critical;
                 else if (warningNow || warningPredicted) status = DiskSpaceStatus.Warning;
-
                 var sb = new StringBuilder();
                 sb.Append($"Free: {FormatBytes(snapshot.freeBytes)} / Total: {FormatBytes(snapshot.totalBytes)} (Drive {snapshot.driveName})");
                 sb.AppendLine();
@@ -124,7 +111,6 @@ namespace AvatarSmartBackup
                     sb.AppendLine();
                     sb.Append($"Estimated next backup: {FormatBytes(requiredBytes + bufferBytes)} (incl. buffer)");
                 }
-
                 if (status == DiskSpaceStatus.Warning)
                 {
                     sb.AppendLine();
@@ -135,9 +121,7 @@ namespace AvatarSmartBackup
                     sb.AppendLine();
                     sb.Append("Critical: insufficient disk space for safe backup.");
                 }
-
                 bool block = status == DiskSpaceStatus.Critical && settings.blockBackupOnLowSpace;
-
                 return UpdateLast(new DiskSpaceReport
                 {
                     Status = status,
@@ -161,7 +145,6 @@ namespace AvatarSmartBackup
                 });
             }
         }
-
         public static void InvalidateSizeCache()
         {
             lock (_lock)
@@ -169,7 +152,6 @@ namespace AvatarSmartBackup
                 _lastBackupSizeTimestampUtc = DateTime.MinValue;
             }
         }
-
         static DiskSpaceReport UpdateLast(DiskSpaceReport report)
         {
             lock (_lock)
@@ -178,12 +160,10 @@ namespace AvatarSmartBackup
             }
             return report;
         }
-
         static DiskSpaceSnapshot CaptureSnapshot()
         {
             string root = FileUtilEx.BackupRoot;
             long backupSize = GetBackupSizeCached(root);
-
             string driveName = string.Empty;
             long total = 0;
             long free = 0;
@@ -202,7 +182,6 @@ namespace AvatarSmartBackup
             {
                 // ignored, fallback to zeros
             }
-
             return new DiskSpaceSnapshot
             {
                 driveName = string.IsNullOrEmpty(driveName) ? "?" : driveName,
@@ -212,7 +191,6 @@ namespace AvatarSmartBackup
                 capturedAtUtc = DateTime.UtcNow
             };
         }
-
         static long GetBackupSizeCached(string root)
         {
             if (string.IsNullOrEmpty(root) || !Directory.Exists(root)) return 0;
@@ -221,7 +199,6 @@ namespace AvatarSmartBackup
                 if (_lastBackupRoot == root && DateTime.UtcNow - _lastBackupSizeTimestampUtc < SizeCacheDuration)
                     return _lastBackupSizeBytes;
             }
-
             long size = 0;
             try
             {
@@ -236,7 +213,6 @@ namespace AvatarSmartBackup
                 }
             }
             catch { }
-
             lock (_lock)
             {
                 _lastBackupRoot = root;
@@ -245,7 +221,6 @@ namespace AvatarSmartBackup
             }
             return size;
         }
-
         public static string FormatBytes(long bytes)
         {
             if (bytes < 0) bytes = 0;
