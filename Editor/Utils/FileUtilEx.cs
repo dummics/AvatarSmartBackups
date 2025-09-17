@@ -29,23 +29,24 @@ namespace AvatarSmartBackup
         static string ComputeHash(HashAlgorithm algorithm, string file)
         {
             using (algorithm)
-            using var stream = File.OpenRead(file);
-
-            var buffer = new byte[64 * 1024];
-            long totalRead = 0;
-            int bytesRead;
-
-            while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+            using (var stream = File.OpenRead(file))
             {
-                algorithm.TransformBlock(buffer, 0, bytesRead, null, 0);
-                totalRead += bytesRead;
+                var buffer = new byte[64 * 1024];
+                long totalRead = 0;
+                int bytesRead;
 
-                if (totalRead % (1024 * 1024) == 0)
-                    System.Threading.Thread.Yield();
+                while ((bytesRead = stream.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    algorithm.TransformBlock(buffer, 0, bytesRead, null, 0);
+                    totalRead += bytesRead;
+
+                    if (totalRead % (1024 * 1024) == 0)
+                        System.Threading.Thread.Yield();
+                }
+
+                algorithm.TransformFinalBlock(buffer, 0, 0);
+                return BytesToHex(algorithm.Hash);
             }
-
-            algorithm.TransformFinalBlock(buffer, 0, 0);
-            return BytesToHex(algorithm.Hash);
         }
 
         static string BytesToHex(byte[] hash)

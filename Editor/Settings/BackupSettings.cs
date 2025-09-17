@@ -11,6 +11,7 @@ namespace AvatarSmartBackup
         public int intervalMinutes = 10;
         public bool advancedMode = false;
         public bool debugMode = false;
+        public bool intervalInSeconds = false;
         public int keepSnapshots = 3;
         public bool backupOnPlayEnter = true;
 
@@ -64,13 +65,15 @@ namespace AvatarSmartBackup
 
         public bool AdvancedMode
         {
-            get => advancedMode || debugMode;
+            get => advancedMode;
             set
             {
                 advancedMode = value;
-                debugMode = value;
+                if (!advancedMode) debugMode = false;
             }
         }
+
+        public bool DiagnosticsEnabled => advancedMode && debugMode;
 
     // UI state (non critico, serializzato con settings)
     public int _activeTab = 0;              // 0 = Backup, 1 = Versions

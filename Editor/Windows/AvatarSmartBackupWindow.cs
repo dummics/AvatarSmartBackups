@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Threading;
@@ -134,8 +135,10 @@ namespace AvatarSmartBackup
         {
             EditorGUILayout.Space(4);
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Interval (s)", GUILayout.Width(110));
-            int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(60)), 1, 119);
+            string intervalLabel = _settings.intervalInSeconds ? "Interval (s)" : "Interval (min)";
+            EditorGUILayout.LabelField(intervalLabel, GUILayout.Width(110));
+            int maxVal = _settings.intervalInSeconds ? 3600 : 240;
+            int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, maxVal);
             if (newInterval != _settings.intervalMinutes)
                 _settings.intervalMinutes = newInterval;
             EditorGUILayout.EndHorizontal();
@@ -144,7 +147,8 @@ namespace AvatarSmartBackup
             if (_settings.lastBackupBytes > 0 && effCopy > 0)
             {
                 double secNeeded = _settings.lastBackupBytes / (effCopy * 1024.0 * 1024.0);
-                if (secNeeded > _settings.intervalMinutes)
+                double intervalSeconds = _settings.intervalInSeconds ? _settings.intervalMinutes : _settings.intervalMinutes * 60.0;
+                if (secNeeded > intervalSeconds)
                 {
                     double minutesNeeded = secNeeded / 60.0;
                     double mb = _settings.lastBackupBytes / (1024.0 * 1024.0);
@@ -215,7 +219,11 @@ namespace AvatarSmartBackup
         if (latest != null)
         {
             EditorGUILayout.LabelField("Latest Version:", EditorStyles.miniBoldLabel);
-            EditorGUILayout.LabelField($"# {latest.id}  {latest.description}", EditorStyles.miniLabel);
+            string desc = string.IsNullOrEmpty(latest.description) ? "(no description)" : latest.description;
+            EditorGUILayout.LabelField($"# {latest.id}  {desc}", EditorStyles.miniLabel);
+            var created = ParseCreatedUtc(latest);
+            if (created != DateTime.MinValue)
+                EditorGUILayout.LabelField($"Created: {created:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
             EditorGUILayout.LabelField($"Files: {latest.fileCount}  Size: {FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
             if (GUILayout.Button(new GUIContent("Go to Versions", "Open Versions tab"), GUILayout.Width(140)))
             {
@@ -294,18 +302,18 @@ namespace AvatarSmartBackup
             // Begin card content
             EditorGUILayout.BeginVertical(GUI.skin.box);
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent(v.pinned ? "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦" : "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ", v.pinned ? "Rimuovi dai preferiti" : "Mantieni (non eliminare)"), GUILayout.Width(24))) pendingTogglePin = v.id;
-            Rect starRect = GUILayoutUtility.GetLastRect(); // valido: c'ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¨ appena stato un controllo disegnato
+            if (GUILayout.Button(new GUIContent(v.pinned ? "★" : "☆", v.pinned ? "Unpin" : "Pin"), GUILayout.Width(24))) pendingTogglePin = v.id;
+            Rect starRect = GUILayoutUtility.GetLastRect(); // rect of the star button
             string title = $"#{v.id}  {(string.IsNullOrEmpty(v.description) ? "(no description)" : v.description)}";
             if (v.incomplete) title += "  (writing...)";
-            if (latest!=null && latest.id==v.id) title = "Latest ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ " + title;
+            if (latest != null && latest.id == v.id) title = "Latest • " + title;
             EditorGUILayout.LabelField(title, isSelected ? _selectedTitleStyle : EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             Rect folderBtnRect = GUILayoutUtility.GetRect(20, 18, GUILayout.Width(20));
             if (_texExplorer != null && Event.current.type == EventType.Repaint)
                 GUI.DrawTexture(folderBtnRect, _texExplorer, ScaleMode.ScaleToFit, true);
             else if (Event.current.type == EventType.Repaint && _texExplorer == null)
-            { var style = EditorStyles.miniLabel; var pc = GUI.color; GUI.color = new Color(1,1,1,0.35f); GUI.Label(folderBtnRect, "ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡", style); GUI.color = pc; }
+            { var style = EditorStyles.miniLabel; var pc = GUI.color; GUI.color = new Color(1,1,1,0.35f); GUI.Label(folderBtnRect, "☰", style); GUI.color = pc; }
             if (GUI.Button(folderBtnRect, GUIContent.none, GUIStyle.none)) { string dir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{v.id:D3}"); if (Directory.Exists(dir)) EditorUtility.RevealInFinder(dir); else EditorUtility.DisplayDialog("Version", "Folder not found", "OK"); }
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.LabelField($"Created: {v.timestamp.ToLocalTime():yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
@@ -398,7 +406,7 @@ namespace AvatarSmartBackup
         if (Event.current.type == EventType.Repaint)
         {
             // Ridisegniamo tutte le card di nuovo? No: semplice approccio futuro -> TODO: convertire in IMGUIContainer overlay.
-            // Per semplicitÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  attuale: niente overlay multi pass; mantenere comportamento precedente (rimosso slot).
+            // Current simplicity: no overlay multi pass; keep previous behaviour (no extra slot).
             // (Se serve davvero overlay fisso, reintrodurremo slot ma con contenuto invisibile invece di vuoto.)
         }
     }
@@ -426,17 +434,27 @@ namespace AvatarSmartBackup
         return $"{val:0.0} {units[u]}";
     }
 
+    DateTime ParseCreatedUtc(VersionInfo info)
+    {
+        if (info == null) return DateTime.MinValue;
+        if (!string.IsNullOrEmpty(info.createdUtc) && DateTime.TryParse(info.createdUtc, null, System.Globalization.DateTimeStyles.RoundtripKind, out var parsed))
+            return parsed.ToLocalTime();
+        if (info.timestamp != default)
+            return info.timestamp.ToLocalTime();
+        return DateTime.MinValue;
+    }
+
     VersionInfo GetLatestVersionCached()
     {
         if (_cachedVersions == null || _cachedVersions.Count == 0) return null;
-        return _cachedVersions.OrderByDescending(v => v.timestamp).FirstOrDefault();
+        return _cachedVersions.OrderByDescending(v => ParseCreatedUtc(v)).FirstOrDefault();
     }
 
     bool CanCreateManualVersion(out string reason)
     {
         reason = string.Empty;
         if (!_settings.AdvancedMode && _cachedVersions != null && _cachedVersions.Count > 0)
-        { reason = "Manual versions only in Debug (auto after backup)"; return false; }
+        { reason = "Manual versions available only in Advanced Mode"; return false; }
         string currentDir = Path.Combine(FileUtilEx.BackupRoot, "Current");
         if (!Directory.Exists(currentDir)) { reason = "No Current backup yet"; return false; }
         double now = EditorApplication.timeSinceStartup;
@@ -488,7 +506,7 @@ namespace AvatarSmartBackup
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Snapshot (Zip) Policy", EditorStyles.boldLabel);
-            if (GUILayout.Button(new GUIContent("?", "Legacy snapshot system ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ mainly for compressed archives."), GUILayout.Width(22)))
+            if (GUILayout.Button(new GUIContent("?", "Legacy snapshot system – mainly for compressed archives."), GUILayout.Width(22)))
             {
                 EditorUtility.DisplayDialog("Snapshot Policy", "Snapshots are compressed .zip archives of the backup set. Regular users can rely on Versions instead.", "OK");
             }
@@ -511,7 +529,7 @@ namespace AvatarSmartBackup
         _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
         if (_settings.AdvancedMode && _settings.lastMeasuredMBps > 0f)
             EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
-        // Benchmark button only in advanced (moved below) ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ keeps UI simpler
+        // Benchmark button only in advanced (moved below) keeps UI simpler
         EditorGUILayout.EndVertical();
 
         // WHAT TO INCLUDE
@@ -576,33 +594,45 @@ namespace AvatarSmartBackup
         EditorGUILayout.EndVertical();
 
         EditorGUILayout.BeginVertical("box");
-        EditorGUILayout.LabelField("Diagnostics & Utilities", EditorStyles.boldLabel);
-        EditorGUI.BeginChangeCheck();
-        bool useGlobal = !_settings.useProjectSettings;
-        bool newUseGlobal = EditorGUILayout.ToggleLeft(new GUIContent("Use global settings", "Use global settings instead of project-local ones."), useGlobal);
-        if (EditorGUI.EndChangeCheck())
+        _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Diagnostics & utilities", "Abilita strumenti aggiuntivi (benchmark, log dettagliati)."), _settings.debugMode);
+        if (_settings.debugMode)
         {
-            _settings.useProjectSettings = !newUseGlobal;
-            BackupManager.SaveSettings(_settings);
-            TimerService.InvalidateSettingsCache();
-            _settings = BackupManager.LoadSettings();
+            EditorGUI.BeginChangeCheck();
+            bool useGlobal = !_settings.useProjectSettings;
+            bool newUseGlobal = EditorGUILayout.ToggleLeft(new GUIContent("Use global settings", "Use global settings instead of project-local ones."), useGlobal);
+            if (EditorGUI.EndChangeCheck())
+            {
+                _settings.useProjectSettings = !newUseGlobal;
+                BackupManager.SaveSettings(_settings);
+                TimerService.InvalidateSettingsCache();
+                _settings = BackupManager.LoadSettings();
+            }
+            if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150))) _ = BackupManager.RunManualBenchmarkAsync(_settings);
+            EditorGUILayout.Space(6);
+            EditorGUILayout.LabelField("Anti-spam cooldowns", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent("Snapshot cooldown (s)", "Minimum seconds between manual snapshots."), GUILayout.Width(160));
+            _settings.manualSnapshotCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualSnapshotCooldownSeconds, GUILayout.Width(60)), 1, 3600);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent("Benchmark cooldown (s)", "Minimum seconds between manual benchmark runs."), GUILayout.Width(160));
+            _settings.manualBenchmarkCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualBenchmarkCooldownSeconds, GUILayout.Width(60)), 1, 3600);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent("Min backup interval (s)", "Minimum seconds between manual backup requests."), GUILayout.Width(160));
+            _settings.minManualBackupIntervalSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.minManualBackupIntervalSeconds, GUILayout.Width(60)), 1, 3600);
+            EditorGUILayout.EndHorizontal();
+            bool useSeconds = EditorGUILayout.ToggleLeft(new GUIContent("Interval in seconds", "Interpret the interval value as seconds instead of minutes."), _settings.intervalInSeconds);
+            if (useSeconds != _settings.intervalInSeconds)
+            {
+                if (useSeconds)
+                    _settings.intervalMinutes = Mathf.Max(1, _settings.intervalMinutes * 60);
+                else
+                    _settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_settings.intervalMinutes / 60f));
+                _settings.intervalInSeconds = useSeconds;
+            }
+            _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(new GUIContent("Detailed file logging", "Enable detailed logging to file for troubleshooting."), _settings.enableDebugLogging);
         }
-        if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150))) _ = BackupManager.RunManualBenchmarkAsync(_settings);
-        EditorGUILayout.Space(6);
-        EditorGUILayout.LabelField("Anti-spam cooldowns", EditorStyles.boldLabel);
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField(new GUIContent("Snapshot cooldown (s)", "Minimum seconds between manual snapshots."), GUILayout.Width(160));
-        _settings.manualSnapshotCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualSnapshotCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-        EditorGUILayout.EndHorizontal();
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField(new GUIContent("Benchmark cooldown (s)", "Minimum seconds between manual benchmark runs."), GUILayout.Width(160));
-        _settings.manualBenchmarkCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualBenchmarkCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-        EditorGUILayout.EndHorizontal();
-        EditorGUILayout.BeginHorizontal();
-        EditorGUILayout.LabelField(new GUIContent("Min backup interval (s)", "Minimum seconds between manual backup requests."), GUILayout.Width(160));
-        _settings.minManualBackupIntervalSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.minManualBackupIntervalSeconds, GUILayout.Width(60)), 1, 3600);
-        EditorGUILayout.EndHorizontal();
-        _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(new GUIContent("Detailed file logging", "Enable detailed logging to file for troubleshooting."), _settings.enableDebugLogging);
         EditorGUILayout.EndVertical();
     }
     
@@ -843,7 +873,7 @@ namespace AvatarSmartBackup
                 if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue;
                 string dst = Path.Combine(FileUtilEx.ProjectRoot, rel);
                 try { Directory.CreateDirectory(Path.GetDirectoryName(dst)); File.Copy(src, dst, true); }
-                catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ " + ex.Message); }
+                catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " - " + ex.Message); }
             }
             MainThread.Invoke(() => AssetDatabase.Refresh());
             EditorUtility.DisplayDialog("Restore", "Restore completato.", "OK");

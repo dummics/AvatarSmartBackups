@@ -82,7 +82,7 @@ namespace AvatarSmartBackup
                 if (string.IsNullOrEmpty(absPath)) return;
                 if (!File.Exists(absPath)) return;
 
-                string rel = FileUtilEx.MakeRelToProject(absPath).Replace("\", "/");
+                string rel = FileUtilEx.MakeRelToProject(absPath).Replace('\', '/');
                 if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) return;
                 if (!SelectionFilter.Allows(selectionRules, rel)) return;
                 if (!CollectHelpers.PassesFolderFilters(rel, settings)) return;
@@ -154,7 +154,7 @@ namespace AvatarSmartBackup
             foreach (var raw in settings.includeFolders)
             {
                 if (string.IsNullOrWhiteSpace(raw)) continue;
-                string trimmed = raw.Trim().Replace("\", "/");
+                string trimmed = raw.Trim().Replace('\', '/');
                 if (!trimmed.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
                 if (!trimmed.EndsWith("/")) trimmed += "/";
                 if (seen.Add(trimmed)) result.Add(trimmed);

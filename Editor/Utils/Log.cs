@@ -118,7 +118,7 @@ namespace AvatarSmartBackup
             
             // Only show in console if advanced mode is enabled
             var settings = SafeGetSettings();
-            if (settings.AdvancedMode && !string.IsNullOrEmpty(consoleMsg))
+            if (settings.DiagnosticsEnabled && !string.IsNullOrEmpty(consoleMsg))
                 LogToConsole(Level.Debug, consoleMsg);
         }
 

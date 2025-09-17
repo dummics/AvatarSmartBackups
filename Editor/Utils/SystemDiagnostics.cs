@@ -14,7 +14,7 @@ namespace AvatarSmartBackup
         public static void TestFileVersioning()
         {
             var settings = BackupManager.LoadSettings();
-            if (!settings.AdvancedMode)
+            if (!settings.DiagnosticsEnabled)
             {
                 EditorUtility.DisplayDialog("Debug Mode Required", 
                     "Debug tests are only available when Debug Mode is enabled in Advanced Settings.", "OK");
@@ -48,7 +48,7 @@ namespace AvatarSmartBackup
         public static void ShowSystemInfo()
         {
             var settings = BackupManager.LoadSettings();
-            if (!settings.AdvancedMode)
+            if (!settings.DiagnosticsEnabled)
             {
                 EditorUtility.DisplayDialog("Debug Mode Required", 
                     "Debug tests are only available when Debug Mode is enabled in Advanced Settings.", "OK");
@@ -71,7 +71,7 @@ namespace AvatarSmartBackup
         public static bool ValidateDebugMenus()
         {
             var settings = BackupManager.LoadSettings();
-            return settings?.AdvancedMode == true;
+            return settings?.DiagnosticsEnabled == true;
         }
     }
 }

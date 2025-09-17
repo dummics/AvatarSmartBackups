@@ -38,7 +38,6 @@ namespace AvatarSmartBackup
     Dictionary<string, CategoryGroup> _categoryMap = new Dictionary<string, CategoryGroup>(StringComparer.OrdinalIgnoreCase);
     List<CategoryGroup> _categoriesOrdered = new List<CategoryGroup>();
     Dictionary<string,int> _fileIndex = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase); // rel -> index in _files
-    bool _enumerationFallbackUsed = false;
     // Manifest MD5 map (rel -> md5) se disponibile per la versione
     Dictionary<string,string> _md5Map = null;
     // Async scan state
@@ -49,7 +48,6 @@ namespace AvatarSmartBackup
     ConcurrentQueue<(int idx, DiffState state, long sizeVer, long sizeProj)> _scanResults = new ConcurrentQueue<(int, DiffState, long, long)>();
     bool _drainHookAdded = false;
     string _currentVersionRoot;
-    double _lastAutoRefreshRequest = -1;
     // (HashCache disabled fallback) – se HashCache.cs non ancora compilato nell'ambiente, usiamo MD5 diretto.
 
     const string PREF_FOLD_SUMMARY = "ASB_Restore_Fold_Summary";
@@ -93,7 +91,6 @@ namespace AvatarSmartBackup
             _fileIndex.Clear();
             _categoryMap.Clear();
             _categoriesOrdered.Clear();
-            _enumerationFallbackUsed = false;
             _md5Map = null;
             string srcRoot = _versionId > 0 ? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
             _currentVersionRoot = srcRoot;
@@ -145,7 +142,6 @@ namespace AvatarSmartBackup
             if (added == 0)
             { // fallback diagnostico (magari i file non hanno prefisso Assets/ per qualche motivo)
                 Enumerate(relaxed:true);
-                if (_files.Count > 0) { _enumerationFallbackUsed = true; }
             }
             LoadManifestMd5(srcRoot);
             PrepareCategoriesPlaceholders();
