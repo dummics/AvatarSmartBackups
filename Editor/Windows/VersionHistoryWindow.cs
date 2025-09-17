@@ -5,7 +5,6 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
-
 namespace AvatarSmartBackup
 {
     public class VersionHistoryWindow : EditorWindow
@@ -14,7 +13,6 @@ namespace AvatarSmartBackup
         private List<VersionInfo> _versions = new List<VersionInfo>();
         private bool _isLoading = true;
         private string _errorMessage = null;
-
         // [MenuItem("Tools/Avatar Smart Backup/Versions")]
         public static void Open()
         {
@@ -23,17 +21,14 @@ namespace AvatarSmartBackup
             window.maxSize = new Vector2(800, 600);
             window.Show();
         }
-
         void OnEnable()
         {
             RefreshVersions();
         }
-
         void RefreshVersions()
         {
             _isLoading = true;
             _errorMessage = null;
-
             try
             {
                 using var versionManager = new FileBasedVersionManager();
@@ -47,7 +42,6 @@ namespace AvatarSmartBackup
                 Debug.LogError($"Failed to load versions: {ex.Message}");
             }
         }
-
         void OnGUI()
         {
             // Header
@@ -58,41 +52,32 @@ namespace AvatarSmartBackup
                 RefreshVersions();
             }
             EditorGUILayout.EndHorizontal();
-
             EditorGUILayout.HelpBox("Each version represents a complete restore point. Click 'Restore' to revert your project to that exact state.", MessageType.Info);
-
             // Status
             if (_isLoading)
             {
                 EditorGUILayout.HelpBox("Loading versions...", MessageType.Info);
                 return;
             }
-
             if (_errorMessage != null)
             {
                 EditorGUILayout.HelpBox($"Error loading versions: {_errorMessage}", MessageType.Error);
                 return;
             }
-
             if (_versions.Count == 0)
             {
                 EditorGUILayout.HelpBox("No versions found. Versions are automatically created after each backup with changes.", MessageType.Info);
                 return;
             }
-
             // Stats
             EditorGUILayout.LabelField($"Total Versions: {_versions.Count}", EditorStyles.miniBoldLabel);
-
             // Versions list
             _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
-
             for (int i = 0; i < _versions.Count; i++)
             {
                 var version = _versions[i];
                 bool isMostRecent = i == 0;
-
                 EditorGUILayout.BeginVertical("box");
-
                 // Version header
                 EditorGUILayout.BeginHorizontal();
                 EditorGUILayout.LabelField($"Version #{version.id}", EditorStyles.boldLabel);
@@ -103,11 +88,9 @@ namespace AvatarSmartBackup
                     GUI.contentColor = Color.white;
                 }
                 EditorGUILayout.EndHorizontal();
-
                 // Version details
                 EditorGUILayout.LabelField($"Description: {version.description}", EditorStyles.miniLabel);
                 EditorGUILayout.LabelField($"Created: {version.timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")}", EditorStyles.miniLabel);
-
                 // Actions
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button("Restore to This Version", GUILayout.Height(25)))
@@ -119,7 +102,6 @@ namespace AvatarSmartBackup
                         PerformRestore(version);
                     }
                 }
-
                 if (GUILayout.Button("Open Folder", GUILayout.Width(100), GUILayout.Height(25)))
                 {
                     string versionDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{version.id:D3}");
@@ -133,18 +115,14 @@ namespace AvatarSmartBackup
                     }
                 }
                 EditorGUILayout.EndHorizontal();
-
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.Space(5);
             }
-
             EditorGUILayout.EndScrollView();
-
             // Footer info
             EditorGUILayout.Space(10);
             EditorGUILayout.HelpBox("💡 Tip: Versions are automatically cleaned up to keep only the 10 most recent ones.", MessageType.Info);
         }
-
         void PerformRestore(VersionInfo version)
         {
             try

@@ -153,7 +153,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                Log.Err("Snapshot error: " + ex.Message);
+                Log.Error("Snapshot error: " + ex.Message, "Snapshot error: " + ex.Message);
             }
         }
 

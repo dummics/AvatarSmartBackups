@@ -81,6 +81,8 @@ namespace AvatarSmartBackup
             {
                 if (string.IsNullOrEmpty(absPath)) return;
                 if (!File.Exists(absPath)) return;
+                // Skip anything under a .git directory
+                if (IsUnderDotGit(absPath)) return;
 
                 string rel = FileUtilEx.MakeRelToProject(absPath).Replace('\\', '/');
                 if (!rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) return;
@@ -237,7 +239,14 @@ namespace AvatarSmartBackup
                 catch { }
                 foreach (var sub in subDirs)
                 {
-                    stack.Push(sub);
+                    try
+                    {
+                        var name = Path.GetFileName(sub);
+                        if (string.Equals(name, ".git", StringComparison.OrdinalIgnoreCase))
+                            continue; // skip .git folders entirely
+                        stack.Push(sub);
+                    }
+                    catch { stack.Push(sub); }
                 }
 
                 string[] files = Array.Empty<string>();
@@ -245,9 +254,18 @@ namespace AvatarSmartBackup
                 catch { }
                 foreach (var file in files)
                 {
+                    if (IsUnderDotGit(file)) continue;
                     yield return file;
                 }
             }
+        }
+
+        static bool IsUnderDotGit(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return false;
+            string p = path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+            string marker = Path.DirectorySeparatorChar + ".git" + Path.DirectorySeparatorChar;
+            return p.IndexOf(marker, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 }

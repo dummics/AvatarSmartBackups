@@ -78,7 +78,8 @@ namespace AvatarSmartBackup
                 foreach (var v in index.versions)
                 {
                     if (string.IsNullOrEmpty(v.guid)) { v.guid = System.Guid.NewGuid().ToString("N"); changed = true; }
-                    if (string.IsNullOrEmpty(v.createdUtc)) { v.createdUtc = v.timestamp == default ? DateTime.UtcNow.ToString("o") : v.timestamp.ToUniversalTime().ToString("o"); changed = true; }
+                    if (v.timestamp == default) { v.timestamp = DateTime.UtcNow; changed = true; }
+                    if (string.IsNullOrEmpty(v.createdUtc) || v.createdUtc.StartsWith("0001-01-01")) { v.createdUtc = v.timestamp.ToUniversalTime().ToString("o"); changed = true; }
                     // size/fileCount left 0 until lazy computed
                     if (string.IsNullOrEmpty(v.manifestFile)) { v.manifestFile = $"v{v.id:D3}/manifest.json"; changed = true; }
                     if (!v.corrupt) v.corrupt = false; // field init (safety)
@@ -88,9 +89,13 @@ namespace AvatarSmartBackup
             }
             else if (index.schemaVersion < VersionIndex.CurrentSchemaVersion)
             {
-                // Future simple forward migration (v1 -> v2 adds 'corrupt' field)
+                // Future simple forward migration (v1 -> v2 adds 'corrupt' field, v2 -> v3 fixes createdUtc if MinValue)
                 foreach (var v in index.versions)
+                {
                     if (!v.corrupt) v.corrupt = false;
+                    if (v.timestamp == default) { v.timestamp = DateTime.UtcNow; changed = true; }
+                    if (string.IsNullOrEmpty(v.createdUtc) || v.createdUtc.StartsWith("0001-01-01")) { v.createdUtc = v.timestamp.ToUniversalTime().ToString("o"); changed = true; }
+                }
                 index.schemaVersion = VersionIndex.CurrentSchemaVersion; changed = true;
             }
             return changed;
@@ -131,6 +136,7 @@ namespace AvatarSmartBackup
                 {
                     string name = Path.GetFileName(src);
                     if (name.Equals("backup.ok", StringComparison.OrdinalIgnoreCase)) continue; // skip marker
+                    if (name.Equals("manifest_v2.json", StringComparison.OrdinalIgnoreCase)) continue; // legacy manifest, non più usata
                     // We always copy manifest.json + assets + meta
                     string rel = MakeRelative(src, currentBackupPath);
                     string dst = Path.Combine(versionDir, rel);
@@ -145,7 +151,9 @@ namespace AvatarSmartBackup
                         version.corrupt = true;
                     }
                     // Stats only count non-meta, non manifest like previous logic
-                    if (!rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) && !rel.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase))
+                    if (!rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+                        && !rel.EndsWith("manifest.json", StringComparison.OrdinalIgnoreCase)
+                        && !rel.EndsWith("manifest_v2.json", StringComparison.OrdinalIgnoreCase))
                     {
                         try { var fi = new FileInfo(src); totalSize += fi.Length; fileCount++; } catch { }
                     }
@@ -188,16 +196,31 @@ namespace AvatarSmartBackup
                     foreach (var f in Directory.GetFiles(versionDir, "*", SearchOption.AllDirectories))
                     {
                         string rel = MakeRelative(f, versionDir);
-                        if (rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase) || rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (rel.EndsWith(".meta", StringComparison.OrdinalIgnoreCase)
+                            || rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase)
+                            || rel.Equals("manifest_v2.json", StringComparison.OrdinalIgnoreCase)
+                            || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
                         try { var fi = new FileInfo(f); size += fi.Length; count++; } catch { }
                     }
                 }
                 catch { v.corrupt = true; changed = true; continue; }
-                bool mismatch = (v.fileCount != count) || (v.totalSizeBytes != size);
-                if (mismatch && !v.corrupt) { v.corrupt = true; changed = true; }
+                if (v.fileCount != count || v.totalSizeBytes != size)
+                {
+                    v.fileCount = count;
+                    v.totalSizeBytes = size;
+                    v.incomplete = false;
+                    v.corrupt = false;
+                    changed = true;
+                }
             }
             if (changed) SaveIndex(index);
-            return index.versions.OrderByDescending(v => v.timestamp).ToList();
+            DateTime ParseCreated(VersionInfo vi)
+            {
+                if (!string.IsNullOrEmpty(vi.createdUtc) && DateTime.TryParse(vi.createdUtc, null, System.Globalization.DateTimeStyles.RoundtripKind, out var c))
+                    return c;
+                return vi.timestamp;
+            }
+            return index.versions.OrderByDescending(v => ParseCreated(v)).ToList();
         }
 
         /// <summary>
@@ -380,7 +403,7 @@ namespace AvatarSmartBackup
     [Serializable]
     public class VersionIndex
     {
-        public static int CurrentSchemaVersion = 2;
+        public static int CurrentSchemaVersion = 3;
         public int schemaVersion;
         public List<VersionInfo> versions;
     }

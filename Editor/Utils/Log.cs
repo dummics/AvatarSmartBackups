@@ -143,11 +143,6 @@ namespace AvatarSmartBackup
             LogToConsole(Level.Error, consoleMsg ?? detailedMsg);
         }
 
-        // Legacy API compatibility (will be updated in Task 3)
-        public static void Info(string msg) => Info(msg, msg);
-        public static void Warn(string msg) => Warn(msg, msg);  
-        public static void Err(string msg) => Error(msg, msg);
-        
         // Utility methods
         public static string GetLogDirectory() => LogDir;
         public static string GetCurrentLogFile() => CurrentLogFile;
