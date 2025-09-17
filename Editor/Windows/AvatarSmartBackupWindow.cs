@@ -38,6 +38,12 @@ namespace AvatarSmartBackup
         int _lastClickId = -1; double _lastClickTime = -1;
         double _lastManualRunTime = -1; // throttle manual backup
         // Textures (Resources)
+        static readonly Color BadgeColorCheckpoint = new Color(0.23f, 0.46f, 0.80f, 0.18f);
+        static readonly Color BadgeColorIncremental = new Color(0.45f, 0.35f, 0.78f, 0.18f);
+        static readonly Color BadgeColorChanged = new Color(0.77f, 0.55f, 0.16f, 0.22f);
+        static readonly Color BadgeColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
+        const float BadgeWidth = 128f;
+        static GUIStyle _badgeStyle;
         static Texture2D _texExplorer; static bool _texTried;
         void EnsureTextures()
         {
@@ -54,8 +60,24 @@ namespace AvatarSmartBackup
             w.minSize = new Vector2(320, 320);
             w.Show();
         }
-        void OnEnable() => _settings = BackupManager.LoadSettings();
-        void OnDisable() { BackupManager.SaveSettings(_settings); TimerService.InvalidateSettingsCache(); }
+        void OnEnable()
+        {
+            _settings = BackupManager.LoadSettings();
+            BackupEvents.BackupCompleted += OnBackupCompleted;
+        }
+        void OnDisable()
+        {
+            BackupEvents.BackupCompleted -= OnBackupCompleted;
+            BackupManager.SaveSettings(_settings);
+            TimerService.InvalidateSettingsCache();
+        }
+        void OnBackupCompleted(BackupRunSummary summary)
+        {
+            _cachedVersions = null;
+            _cachedCurrentSig = null;
+            _cachedCurrentSigTime = 0;
+            Repaint();
+        }
         void OnGUI()
         {
             try
@@ -157,27 +179,43 @@ namespace AvatarSmartBackup
         void DrawIntervalControls()
         {
             EditorGUILayout.BeginHorizontal();
+            bool changed = false;
             string[] unitOptions = { AvatarSmartBackup.Localization.L.T("ui.interval.min", "min"), AvatarSmartBackup.Localization.L.T("ui.interval.sec", "sec") };
             int currentUnitIndex = _settings.intervalInSeconds ? 1 : 0;
             EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.interval.label", "Interval"), GUILayout.Width(60));
             int maxValue = _settings.intervalInSeconds ? 3600 : 240;
             int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, maxValue);
             if (newInterval != _settings.intervalMinutes)
+            {
                 _settings.intervalMinutes = newInterval;
+                changed = true;
+            }
             int newUnitIndex = EditorGUILayout.Popup(currentUnitIndex, unitOptions, GUILayout.Width(50));
             if (newUnitIndex != currentUnitIndex)
             {
                 if (newUnitIndex == 1 && !_settings.intervalInSeconds)
                 {
                     _settings.intervalMinutes = Mathf.Max(1, _settings.intervalMinutes * 60);
+                    changed = true;
                 }
                 else if (newUnitIndex == 0 && _settings.intervalInSeconds)
                 {
                     _settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_settings.intervalMinutes / 60f));
+                    changed = true;
                 }
                 _settings.intervalInSeconds = (newUnitIndex == 1);
+                changed = true;
             }
             EditorGUILayout.EndHorizontal();
+            if (changed)
+            {
+                TimerService.InvalidateSettingsCache();
+                if (Session.IsRunning)
+                {
+                    TimerService.ScheduleNextRun(_settings);
+                }
+                Repaint();
+            }
         }
 
         }
@@ -345,7 +383,7 @@ namespace AvatarSmartBackup
                 var created = ParseCreatedUtc(v);
                 EditorGUILayout.LabelField($"Created: {(created == DateTime.MinValue ? "--" : created.ToString("yyyy-MM-dd HH:mm:ss"))}", EditorStyles.miniLabel);
                 EditorGUILayout.LabelField($"Files: {v.fileCount}    Size: {FormatSize(v.totalSizeBytes)}", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField(BuildVersionTypeSummary(v), EditorStyles.miniLabel);
+                DrawVersionBadges(v);
                 string changeSummary = BuildChangeCountSummary(v);
                 if (!string.IsNullOrEmpty(changeSummary))
                     EditorGUILayout.LabelField(changeSummary, EditorStyles.miniLabel);
@@ -556,41 +594,36 @@ namespace AvatarSmartBackup
         }
 
         void ShowVersionDiffSummary(VersionInfo info)
+
         {
+
             if (info == null) return;
+
             try
+
             {
+
                 var meta = VersionRestoreService.LoadDeltaMetadata(info) ?? new VersionDeltaMetadata();
-                var sb = new StringBuilder();
-                sb.AppendLine(BuildVersionDetailSummary(info));
-                if (meta.changedEntries != null && meta.changedEntries.Count > 0)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("Modified:");
-                    int limit = Mathf.Min(20, meta.changedEntries.Count);
-                    for (int i = 0; i < limit; i++)
-                        sb.AppendLine($" • {meta.changedEntries[i].relPath}");
-                    if (meta.changedEntries.Count > limit)
-                        sb.AppendLine($" • (+{meta.changedEntries.Count - limit} more)");
-                }
-                if (meta.removedEntries != null && meta.removedEntries.Count > 0)
-                {
-                    sb.AppendLine();
-                    sb.AppendLine("Removed:");
-                    int limit = Mathf.Min(10, meta.removedEntries.Count);
-                    for (int i = 0; i < limit; i++)
-                        sb.AppendLine($" • {meta.removedEntries[i]}");
-                    if (meta.removedEntries.Count > limit)
-                        sb.AppendLine($" • (+{meta.removedEntries.Count - limit} more)");
-                }
-                EditorUtility.DisplayDialog($"Version #{info.id}", sb.ToString().Trim(), "Close");
+
+                VersionChangesWindow.Open(info, meta);
+
             }
+
             catch (Exception ex)
+
             {
+
                 Log.Warn("Version diff summary failed: " + ex.Message);
-                EditorUtility.DisplayDialog("Show changes", "Unable to read changes:\n" + ex.Message, "OK");
+
+                var message = string.Format(L.T("vc.error.body", "Unable to read changes:
+{0}"), ex.Message);
+
+                EditorUtility.DisplayDialog(L.T("vc.error.title", "Show changes"), message, "OK");
+
             }
+
         }
+
 
         void TriggerSnapshotRebuild(VersionInfo info)
         {
@@ -1063,4 +1096,5 @@ namespace AvatarSmartBackup
     }
 }
 #endif
+
 

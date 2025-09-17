@@ -24,8 +24,19 @@ namespace AvatarSmartBackup
         }
         void OnEnable()
         {
+            BackupEvents.BackupCompleted += OnBackupCompleted;
             RefreshVersions();
         }
+        void OnDisable()
+        {
+            BackupEvents.BackupCompleted -= OnBackupCompleted;
+        }
+        void OnBackupCompleted(BackupRunSummary summary)
+        {
+            RefreshVersions();
+            Repaint();
+        }
+
         void RefreshVersions()
         {
             _isLoading = true;

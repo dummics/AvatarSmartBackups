@@ -450,6 +450,13 @@ namespace AvatarSmartBackup
 
         public static async Task RunBackupNowAsync(BackupSettings s, bool showToast, string reason, bool showProgressUI, bool forceZip)
         {
+            bool success = false;
+            bool versionCreated = false;
+            int? createdVersionId = null;
+            bool createdVersionIsCheckpoint = false;
+            long totalBytes = 0;
+            int copied = 0;
+            string normalizedReason = string.IsNullOrEmpty(reason) ? "timer" : reason;
             try
             {
                 if (Interlocked.Exchange(ref _busy, 1) == 1)
@@ -502,8 +509,8 @@ namespace AvatarSmartBackup
                 var copyJobs = plan.CopyJobs;
                 var man = plan.Manifest;
                 var plannedFiles = plan.Files;
-                long totalBytes = plan.TotalBytes;
-                int copied = plan.CopiedCount;
+                totalBytes = plan.TotalBytes;
+                copied = plan.CopiedCount;
                 int skipped = plan.SkippedCount;
 
                 // 2) Copie (background, non modale, throttled)
@@ -610,11 +617,29 @@ namespace AvatarSmartBackup
                             _ => "Auto backup"
                         };
                         
-                        bool versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir, s, forceCheckpoint: reason == "manual");
+                        versionCreated = versionManager.CreateVersion(versionDescription, CurrentDir, s, forceCheckpoint: null);
                         if (versionCreated)
                         {
                             Log.Info("Version created for this backup");
                             s.selectionLocked = true;
+
+                            try
+                            {
+                                var versions = versionManager.GetVersions();
+                                if (versions != null && versions.Count > 0)
+                                {
+                                    var created = versions.OrderByDescending(v => v.id).FirstOrDefault();
+                                    if (created != null)
+                                    {
+                                        createdVersionId = created.id;
+                                        createdVersionIsCheckpoint = created.isCheckpoint;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Debug("Failed to resolve created version info: " + ex.Message);
+                            }
                         }
                         
                         // Cleanup old versions (keep last 10)
@@ -632,21 +657,26 @@ namespace AvatarSmartBackup
                     SaveSettings(s);
                     TimerService.InvalidateSettingsCache();
                 });
+                success = true;
             }
             catch (OperationCanceledException)
             {
                 Log.Warn("Backup operation was canceled by user", "Backup canceled");
+                success = false;
             }
             catch (Exception ex)
             {
                 // Use new centralized exception handling
                 string detailedMsg = $"Backup operation failed: {ex.Message}";
                 Log.Error(detailedMsg, "Backup failed (see log file for details)", ex);
+                success = false;
             }
             finally
             {
                 Interlocked.Exchange(ref _busy, 0);
                 try { _one.Release(); } catch { }
+                var summary = new BackupRunSummary(success, normalizedReason, copied > 0, versionCreated, createdVersionId, createdVersionIsCheckpoint, totalBytes, DateTime.UtcNow);
+                MainThread.Invoke(() => BackupEvents.RaiseCompleted(summary));
                 bool again = Interlocked.Exchange(ref _pendingRun, 0) == 1;
                 if (again)
                 {
