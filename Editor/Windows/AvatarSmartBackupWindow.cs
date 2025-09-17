@@ -47,17 +47,12 @@ namespace AvatarSmartBackup
                 _texTried = true;
             }
         }
-        [MenuItem("Tools/Avatar Smart Backup")]
+        [MenuItem("Avatar Smart Backup/Open", false, 0)]
         public static void Open()
         {
             var w = GetWindow<AvatarSmartBackupWindow>(true, AvatarSmartBackup.Localization.L.T("window.main.title", "Avatar Smart Backup"));
             w.minSize = new Vector2(320, 320);
             w.Show();
-        }
-        [MenuItem("Tools/Avatar Smart Backup/Open", false, 0)]
-        public static void OpenAlternative()
-        {
-            Open();
         }
         void OnEnable() => _settings = BackupManager.LoadSettings();
         void OnDisable() { BackupManager.SaveSettings(_settings); TimerService.InvalidateSettingsCache(); }
@@ -202,8 +197,8 @@ namespace AvatarSmartBackup
             EditorGUILayout.BeginHorizontal();
             using (new EditorGUI.DisabledScope(!canManual || BackupManager.IsBusy))
             {
-                string backupTooltip = _settings.AdvancedMode ? "Run a backup now (no cooldown in Advanced Mode)" : tooltip;
-                if (GUILayout.Button(new GUIContent("Backup Now", backupTooltip)))
+                string backupTooltip = _settings.AdvancedMode ? AvatarSmartBackup.Localization.L.T("tt.backup.now.advanced", "Run a backup now (no cooldown in Advanced Mode)") : tooltip;
+                if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.backup.now", "Backup Now"), backupTooltip)))
                 {
                     _lastManualRunTime = now;
                     BackupManager.RunBackupNow(_settings, showToast: true, reason: "manual", showProgressUI: true);
@@ -213,14 +208,14 @@ namespace AvatarSmartBackup
             var latest = GetLatestVersionCached();
             using (new EditorGUI.DisabledScope(latest == null))
             {
-                string restoreTooltip = latest == null ? "No version available" : "Open the latest version to restore or inspect";
-                if (GUILayout.Button(new GUIContent("Preview & Restore latest", restoreTooltip)))
+                string restoreTooltip = latest == null ? AvatarSmartBackup.Localization.L.T("tt.latest.none", "No version available") : AvatarSmartBackup.Localization.L.T("tt.latest.open", "Open the latest version to restore or inspect");
+                if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.latest.previewRestore", "Preview & Restore latest"), restoreTooltip)))
                 {
                     if (latest != null)
                         RestorePreviewWindow.Open(latest.id);
                 }
             }
-            if (GUILayout.Button(new GUIContent("Open Backup Folder", "Open the backups folder")))
+            if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.open.backup.folder", "Open Backup Folder"), AvatarSmartBackup.Localization.L.T("tt.open.backup.folder", "Open the backups folder"))))
             {
                 EditorUtility.RevealInFinder(FileUtilEx.BackupRoot);
             }
@@ -229,16 +224,16 @@ namespace AvatarSmartBackup
         void DrawAdvancedOverview()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Advanced Tools", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.advanced.tools.title", "Advanced Tools"), EditorStyles.boldLabel);
             // Single toolbar row with actions
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Open Log Folder", "Open the logs folder for support"), GUILayout.Width(150)))
+            if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.advanced.openLogFolder", "Open Log Folder"), AvatarSmartBackup.Localization.L.T("tt.advanced.openLogFolder", "Open the logs folder for support")), GUILayout.Width(150)))
             {
                 string logDir = Log.GetLogDirectory();
                 if (Directory.Exists(logDir)) EditorUtility.RevealInFinder(logDir);
-                else EditorUtility.DisplayDialog("Log Folder", "Log folder not found.", "OK");
+                else EditorUtility.DisplayDialog(AvatarSmartBackup.Localization.L.T("dlg.log.title", "Log Folder"), AvatarSmartBackup.Localization.L.T("dlg.log.notfound", "Log folder not found."), "OK");
             }
-            if (GUILayout.Button(new GUIContent("Refresh Versions", "Reload the list of versions"), GUILayout.Width(150)))
+            if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.advanced.refreshVersions", "Refresh Versions"), AvatarSmartBackup.Localization.L.T("tt.advanced.refreshVersions", "Reload the list of versions")), GUILayout.Width(150)))
             {
                 _cachedVersions = null;
                 EnsureVersionsCache();
@@ -250,40 +245,44 @@ namespace AvatarSmartBackup
         void DrawVersionsOverview()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Latest Version", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.latest.title", "Latest Version"), EditorStyles.boldLabel);
             EnsureVersionsCache();
             var latest = GetLatestVersionCached();
             if (latest != null)
             {
-                EditorGUILayout.LabelField("Latest Version:", EditorStyles.miniBoldLabel);
-                string desc = string.IsNullOrEmpty(latest.description) ? "(no description)" : latest.description;
+                EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.latest.label", "Latest Version:"), EditorStyles.miniBoldLabel);
+                string desc = string.IsNullOrEmpty(latest.description) ? AvatarSmartBackup.Localization.L.T("ui.overview.noDescription", "(no description)") : latest.description;
                 EditorGUILayout.LabelField($"# {latest.id}  {desc}", EditorStyles.miniLabel);
                 var created = ParseCreatedUtc(latest);
                 if (created != DateTime.MinValue)
-                    EditorGUILayout.LabelField($"Created: {created:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField($"Files: {latest.fileCount}  Size: {FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
-                if (GUILayout.Button(new GUIContent("Go to Versions", "Open Versions tab"), GUILayout.Width(140)))
+                    EditorGUILayout.LabelField($"{AvatarSmartBackup.Localization.L.T("ui.overview.created", "Created:")} {created:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
+                {
+                    var filesLbl = AvatarSmartBackup.Localization.L.T("ui.overview.filesSize", "Files");
+                    var sizeLbl = AvatarSmartBackup.Localization.L.T("ui.overview.size", "Size");
+                    EditorGUILayout.LabelField($"{filesLbl}: {latest.fileCount}  {sizeLbl}: {FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
+                }
+                if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.overview.gotoVersions", "Go to Versions"), AvatarSmartBackup.Localization.L.T("tt.overview.gotoVersions", "Open Versions tab")), GUILayout.Width(140)))
                 {
                     _settings._activeTab = 1;
                 }
             }
             else
             {
-                EditorGUILayout.LabelField("No versions available", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.none", "No versions available"), EditorStyles.miniLabel);
             }
             EditorGUILayout.EndVertical();
         }
         void DrawVersionsTab()
         {
-            EditorGUILayout.LabelField("Versions", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Restore points are automatically created when there are changes. Use the star to pin, click to select, double-click to preview.", MessageType.Info);
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.versions.title", "Versions"), EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.versions.help", "Restore points are automatically created when there are changes. Use the star to pin, click to select, double-click to preview."), MessageType.Info);
             // Versions list (in-place selection, no reordering)
             EnsureVersionsCache();
             var latest = GetLatestVersionCached();
             if (_selectedVersionId < 0 && latest != null) _selectedVersionId = latest.id;
             // Toolbar line
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent("Refresh", "Reload versions from disk"), GUILayout.Width(70))) _cachedVersions = null;
+            if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.versions.refresh", "Refresh"), AvatarSmartBackup.Localization.L.T("tt.versions.refresh", "Reload versions from disk")), GUILayout.Width(70))) _cachedVersions = null;
             if (_settings.showRebuildTool)
             {
                 if (GUILayout.Button(new GUIContent("Rebuild Index", "Recalculate fileCount/size from existing manifests"), GUILayout.Width(120)))

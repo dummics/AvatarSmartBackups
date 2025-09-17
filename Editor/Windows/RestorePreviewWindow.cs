@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
+using AvatarSmartBackup.Localization;
 
 namespace AvatarSmartBackup
 {
@@ -107,7 +108,7 @@ namespace AvatarSmartBackup
                 _versionInfo = vmInfo.GetVersion(_versionId);
                 if (_versionInfo == null)
                 {
-                    EditorUtility.DisplayDialog("Restore", $"Version #{_versionId} not found.", "OK");
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.notfound", "Version #{0} not found."), _versionId), "OK");
                     return;
                 }
                 try
@@ -118,7 +119,7 @@ namespace AvatarSmartBackup
                 }
                 catch (Exception ex)
                 {
-                    EditorUtility.DisplayDialog("Restore", $"Failed to prepare snapshot for version {_versionId}:\n{ex.Message}", "OK");
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepare.fail", "Failed to prepare snapshot for version {0}:\n{1}"), _versionId, ex.Message), "OK");
                     return;
                 }
             }
@@ -133,7 +134,7 @@ namespace AvatarSmartBackup
             if (_versionId <= 0)
             {
                 var ok = Path.Combine(srcRoot, "backup.ok");
-                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.restore.incomplete", "Backup in progress or not complete."), "OK"); return; }
             }
             int added = 0;
             void Enumerate(bool relaxed)
@@ -388,9 +389,9 @@ namespace AvatarSmartBackup
             // Assicurati che eventuali cambi colore precedenti non contaminino tutto
             GUI.color = Color.white;
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-            EditorGUILayout.LabelField($"Restore Preview {( _versionId>0?"v"+_versionId.ToString("D3"):"Current")}", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(L.T("rp.title", "Restore Preview") + " " + ( _versionId>0? ("v"+_versionId.ToString("D3")) : L.T("rp.current", "Current")), EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(new GUIContent("Open Folder","Open version folder"), GUILayout.Width(100)))
+            if (GUILayout.Button(new GUIContent(L.T("rp.open.folder", "Open Folder"), L.T("rp.open.folder.tt", "Open version folder")), GUILayout.Width(100)))
             {
                 string root = _versionId>0? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
                 EditorUtility.RevealInFinder(root);
@@ -399,12 +400,12 @@ namespace AvatarSmartBackup
             if (_versionInfo != null)
             {
                 var infoMsg = _versionInfo.isCheckpoint
-                    ? "Full checkpoint: files are ready for direct restore."
-                    : $"Incremental version: automatically reconstructed from checkpoint #{_versionInfo.checkpointId}.";
+                    ? L.T("rp.info.full", "Full checkpoint: files are ready for direct restore.")
+                    : string.Format(L.T("rp.info.incr", "Incremental version: automatically reconstructed from checkpoint #{0}."), _versionInfo.checkpointId);
                 var diffCount = _deltaMetadata?.changedEntries?.Count ?? _versionInfo.changedFileCount;
                 var removedCount = _deltaMetadata?.removedEntries?.Count ?? _versionInfo.removedFileCount;
                 if (diffCount > 0 || removedCount > 0)
-                    infoMsg += $"\nModifiche registrate: {diffCount} (rimossi: {removedCount}).";
+                    infoMsg += "\n" + string.Format(L.T("rp.info.changes", "Recorded changes: {0} (removed: {1})."), diffCount, removedCount);
                 if (!string.IsNullOrEmpty(_snapshotWarning))
                     infoMsg += "\n" + _snapshotWarning;
                 EditorGUILayout.HelpBox(infoMsg, MessageType.Info);
@@ -413,9 +414,9 @@ namespace AvatarSmartBackup
             if (_isScanning)
             {
                 float p = _scanTotal > 0 ? (float)_scanProcessed / _scanTotal : 0f;
-                EditorGUILayout.HelpBox($"Scanning files... {_scanProcessed}/{_scanTotal} ({p*100f:0.0}%)", MessageType.Info);
+                EditorGUILayout.HelpBox(string.Format(L.T("rp.scan.progress", "Scanning files... {0}/{1} ({2:0.0}%)"), _scanProcessed, _scanTotal, p*100f), MessageType.Info);
                 Rect r = GUILayoutUtility.GetRect(4, 18);
-                EditorGUI.ProgressBar(r, p, "Building diff");
+                EditorGUI.ProgressBar(r, p, L.T("rp.scan.bar", "Building diff"));
                 GUILayout.Space(4);
             }
 
@@ -442,25 +443,25 @@ namespace AvatarSmartBackup
                 }
                 _lastFilter = _filter;
             }
-            EditorGUILayout.HelpBox("Choose what to restore. Expand sections: Summary, Filters, Selection, Files. The safety backup toggle is in the footer.", MessageType.Info);
+            EditorGUILayout.HelpBox(L.T("rp.help", "Choose what to restore. Expand sections: Summary, Filters, Selection, Files. The safety backup toggle is in the footer."), MessageType.Info);
 
             // SUMMARY FOLDOUT (FIRST)
-            _foldSummary = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSummary, $"Summary");
+            _foldSummary = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSummary, L.T("rp.fold.summary", "Summary"));
             if (_foldSummary)
             {
                 int total = _diffInfos.Count; int news = _diffInfos.Count(d=>d.state==DiffState.New); int changed = _diffInfos.Count(d=>d.state==DiffState.Changed); int same = _diffInfos.Count(d=>d.state==DiffState.Same);
-                EditorGUILayout.LabelField($"Files: {total}   New: {news}   Changed: {changed}   Same: {same}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(string.Format(L.T("rp.stats", "Files: {0}   New: {1}   Changed: {2}   Same: {3}"), total, news, changed, same), EditorStyles.miniLabel);
                 EditorGUILayout.BeginHorizontal();
-                DrawBigStat("NEW", news.ToString(), new Color(0.40f,0.80f,0.45f,1f));
-                DrawBigStat("CHANGED", changed.ToString(), new Color(0.95f,0.80f,0.35f,1f));
-                DrawBigStat("SAME", same.ToString(), new Color(0.55f,0.55f,0.55f,1f));
+                DrawBigStat(L.T("rp.stat.new", "NEW"), news.ToString(), new Color(0.40f,0.80f,0.45f,1f));
+                DrawBigStat(L.T("rp.stat.changed", "CHANGED"), changed.ToString(), new Color(0.95f,0.80f,0.35f,1f));
+                DrawBigStat(L.T("rp.stat.same", "SAME"), same.ToString(), new Color(0.55f,0.55f,0.55f,1f));
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button(new GUIContent("Restore ALL","Restore all files"), GUILayout.Width(120), GUILayout.Height(28))) { SelectAllInternal(true); DoRestore(); }
+                if (GUILayout.Button(new GUIContent(L.T("rp.restore.all", "Restore ALL"), L.T("rp.restore.all.tt", "Restore all files")), GUILayout.Width(120), GUILayout.Height(28))) { SelectAllInternal(true); DoRestore(); }
                 EditorGUILayout.EndHorizontal();
                 if (_extCounts.Count > 0)
                 {
                     GUILayout.Space(4);
-                    EditorGUILayout.LabelField("Top extensions", EditorStyles.miniBoldLabel);
+                    EditorGUILayout.LabelField(L.T("rp.top.extensions", "Top extensions"), EditorStyles.miniBoldLabel);
                     EditorGUILayout.BeginHorizontal();
                     EditorGUILayout.BeginVertical(GUILayout.MaxWidth(160));
                     foreach (var kv in _extCounts.OrderByDescending(k=>k.Value).Take(6)) EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
@@ -468,7 +469,7 @@ namespace AvatarSmartBackup
                     if (_assetTypeCounts.Count > 0)
                     {
                         EditorGUILayout.BeginVertical(GUILayout.MaxWidth(180));
-                        EditorGUILayout.LabelField(".asset types", EditorStyles.miniBoldLabel);
+                        EditorGUILayout.LabelField(L.T("rp.asset.types", ".asset types"), EditorStyles.miniBoldLabel);
                         foreach (var kv in _assetTypeCounts.OrderByDescending(k=>k.Value).Take(6)) EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
                         EditorGUILayout.EndVertical();
                     }
@@ -479,35 +480,35 @@ namespace AvatarSmartBackup
             EditorGUILayout.EndFoldoutHeaderGroup();
 
             // FILTERS FOLDOUT
-            _foldFilters = EditorGUILayout.BeginFoldoutHeaderGroup(_foldFilters, "Filters");
+            _foldFilters = EditorGUILayout.BeginFoldoutHeaderGroup(_foldFilters, L.T("rp.fold.filters", "Filters"));
             if (_foldFilters)
             {
                 EditorGUILayout.BeginHorizontal();
-                bool newShowNew = GUILayout.Toggle(_showNew, new GUIContent("New","Show New"), "Button", GUILayout.Width(60));
-                bool newShowChanged = GUILayout.Toggle(_showChanged, new GUIContent("Changed","Show Changed"), "Button", GUILayout.Width(70));
-                bool newShowSame = GUILayout.Toggle(_showSame, new GUIContent("Same","Show Same"), "Button", GUILayout.Width(60));
-                bool newHideMeta = GUILayout.Toggle(_hideMeta, new GUIContent("Hide .meta","Hide .meta"), "Button", GUILayout.Width(80));
+                bool newShowNew = GUILayout.Toggle(_showNew, new GUIContent(L.T("rp.filter.new", "New"), L.T("rp.filter.new.tt", "Show New")), "Button", GUILayout.Width(60));
+                bool newShowChanged = GUILayout.Toggle(_showChanged, new GUIContent(L.T("rp.filter.changed", "Changed"), L.T("rp.filter.changed.tt", "Show Changed")), "Button", GUILayout.Width(70));
+                bool newShowSame = GUILayout.Toggle(_showSame, new GUIContent(L.T("rp.filter.same", "Same"), L.T("rp.filter.same.tt", "Show Same")), "Button", GUILayout.Width(60));
+                bool newHideMeta = GUILayout.Toggle(_hideMeta, new GUIContent(L.T("rp.filter.hideMeta", "Hide .meta"), L.T("rp.filter.hideMeta.tt", "Hide .meta")), "Button", GUILayout.Width(80));
                 if (newShowNew!=_showNew || newShowChanged!=_showChanged || newShowSame!=_showSame || newHideMeta!=_hideMeta)
                 { _showNew=newShowNew; _showChanged=newShowChanged; _showSame=newShowSame; _hideMeta=newHideMeta; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
-                if (GUILayout.Button("Reset", GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
+                if (GUILayout.Button(L.T("rp.reset", "Reset"), GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
                 GUILayout.FlexibleSpace();
-                EditorGUILayout.LabelField("Search:", GUILayout.Width(48));
+                EditorGUILayout.LabelField(L.T("rp.search", "Search:"), GUILayout.Width(48));
                 _filter = GUILayout.TextField(_filter, GUILayout.Width(220));
                 EditorGUILayout.EndHorizontal();
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
 
             // SELECTION TOOLS FOLDOUT
-            _foldSelection = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSelection, "Selection");
+            _foldSelection = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSelection, L.T("rp.fold.selection", "Selection"));
             if (_foldSelection)
             {
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Select All", GUILayout.Width(90))) { SelectAllInternal(true); }
-                if (GUILayout.Button("Select New+Changed", GUILayout.Width(140))) { ApplySelectStates(d=> d.state==DiffState.New || d.state==DiffState.Changed, true); }
-                if (GUILayout.Button("Deselect All", GUILayout.Width(100))) { SelectAllInternal(false); }
-                if (GUILayout.Button("Invert", GUILayout.Width(70))) { for (int i=0;i<_selected.Count;i++) _selected[i]=!_selected[i]; }
+                if (GUILayout.Button(L.T("rp.select.all", "Select All"), GUILayout.Width(90))) { SelectAllInternal(true); }
+                if (GUILayout.Button(L.T("rp.select.newchanged", "Select New+Changed"), GUILayout.Width(140))) { ApplySelectStates(d=> d.state==DiffState.New || d.state==DiffState.Changed, true); }
+                if (GUILayout.Button(L.T("rp.deselect.all", "Deselect All"), GUILayout.Width(100))) { SelectAllInternal(false); }
+                if (GUILayout.Button(L.T("rp.invert", "Invert"), GUILayout.Width(70))) { for (int i=0;i<_selected.Count;i++) _selected[i]=!_selected[i]; }
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Refresh", GUILayout.Width(70))) LoadFiles();
+                if (GUILayout.Button(L.T("rp.refresh", "Refresh"), GUILayout.Width(70))) LoadFiles();
                 EditorGUILayout.EndHorizontal();
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
@@ -605,20 +606,20 @@ namespace AvatarSmartBackup
                     }
                 }
                 EditorGUILayout.EndScrollView();
-                EditorGUILayout.LabelField($"Items: {totalVisible}    Selected: {totalSelectedVisible}", EditorStyles.miniLabel);
-                if (totalVisible==0) EditorGUILayout.HelpBox("No files match the current filters.", MessageType.Info);
+                EditorGUILayout.LabelField(string.Format(L.T("rp.items.selected", "Items: {0}    Selected: {1}"), totalVisible, totalSelectedVisible), EditorStyles.miniLabel);
+                if (totalVisible==0) EditorGUILayout.HelpBox(L.T("rp.no.files", "No files match the current filters."), MessageType.Info);
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
 
             // Footer
             GUILayout.Space(4);
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-            if (GUILayout.Button("Cancel", GUILayout.Width(90))) { Close(); }
+            if (GUILayout.Button(L.T("rp.cancel", "Cancel"), GUILayout.Width(90))) { Close(); }
             GUILayout.FlexibleSpace();
-            _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent("Safety Backup","Create PreRestore copy before restoring"), GUILayout.Width(110));
+            _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent(L.T("rp.safety", "Safety Backup"), L.T("rp.safety.tt", "Create PreRestore copy before restoring")), GUILayout.Width(120));
             int selectedCount = 0; long selectedSize = 0; for (int i=0;i<_diffInfos.Count;i++) if (_selected[i]) { selectedCount++; selectedSize += _diffInfos[i].size; }
-            GUILayout.Label($"Selected: {selectedCount} files ({FormatSize(selectedSize)})", EditorStyles.miniLabel);
-            if (GUILayout.Button(new GUIContent("Restore Selected","Restore selected files"), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
+            GUILayout.Label(string.Format(L.T("rp.selected.summary", "Selected: {0} files ({1})"), selectedCount, FormatSize(selectedSize)), EditorStyles.miniLabel);
+            if (GUILayout.Button(new GUIContent(L.T("rp.restore.selected", "Restore Selected"), L.T("rp.restore.selected.tt", "Restore selected files")), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
             EditorGUILayout.EndHorizontal();
 
             // Shortcuts: Invio = restore (context aware), Esc = cancel
@@ -648,19 +649,19 @@ namespace AvatarSmartBackup
                 }
                 catch (Exception ex)
                 {
-                    EditorUtility.DisplayDialog("Restore", $"Failed to prepare version data: \n{ex.Message}", "OK");
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepareVersion.fail", "Failed to prepare version data: \n{0}"), ex.Message), "OK");
                     return;
                 }
             }
             else
             {
                 srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
-                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "No Current/ backup found.", "OK"); return; }
+                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.current.notfound", "No Current/ backup found."), "OK"); return; }
                 var ok = Path.Combine(srcRoot, "backup.ok");
-                if (!File.Exists(ok)) { EditorUtility.DisplayDialog("Restore", "Backup in progress or not complete.", "OK"); return; }
+                if (!File.Exists(ok)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.restore.incomplete", "Backup in progress or not complete."), "OK"); return; }
                 _snapshotWarning = null;
             }
-            if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog("Restore", "Version files not found.", "OK"); return; }
+            if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.version.notfound", "Version files not found."), "OK"); return; }
     
             _currentVersionRoot = srcRoot;
             // Se richiesto, fai backup corrente degli Assets prima di sovrascrivere
@@ -677,7 +678,7 @@ namespace AvatarSmartBackup
                     }
                     Log.Info("Pre-restore backup created: " + safedir);
                 }
-                catch (Exception ex) { Log.Warn("Pre-restore backup failed: " + ex.Message); if (!EditorUtility.DisplayDialog("Backup failed", "Pre-restore backup failed. Continue restore anyway?", "Yes", "No")) return; }
+                catch (Exception ex) { Log.Warn("Pre-restore backup failed: " + ex.Message); if (!EditorUtility.DisplayDialog(L.T("rp.backup.failed.title", "Backup failed"), L.T("rp.backup.failed.body", "Pre-restore backup failed. Continue restore anyway?"), L.T("rp.yes", "Yes"), L.T("rp.no", "No"))) return; }
             }
     
             int restored = 0;
@@ -691,7 +692,7 @@ namespace AvatarSmartBackup
                 catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " – " + ex.Message); }
             }
             AssetDatabase.Refresh();
-            EditorUtility.DisplayDialog("Restore", $"Restore completed. Files restored: {restored}", "OK");
+            EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.done", "Restore completed. Files restored: {0}"), restored), "OK");
             Close();
         }
 

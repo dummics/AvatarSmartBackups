@@ -47,8 +47,8 @@ namespace AvatarSmartBackup
         {
             // Header
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Backup Versions", EditorStyles.boldLabel);
-            if (GUILayout.Button("Refresh", GUILayout.Width(80)))
+            EditorGUILayout.LabelField(L.T("vh.title", "Backup Versions"), EditorStyles.boldLabel);
+            if (GUILayout.Button(L.T("vh.refresh", "Refresh"), GUILayout.Width(80)))
             {
                 RefreshVersions();
             }
@@ -57,21 +57,21 @@ namespace AvatarSmartBackup
             // Status
             if (_isLoading)
             {
-                EditorGUILayout.HelpBox("Loading versions...", MessageType.Info);
+                EditorGUILayout.HelpBox(L.T("vh.loading", "Loading versions..."), MessageType.Info);
                 return;
             }
             if (_errorMessage != null)
             {
-                EditorGUILayout.HelpBox($"Error loading versions: {_errorMessage}", MessageType.Error);
+                EditorGUILayout.HelpBox(string.Format(L.T("vh.load.error", "Error loading versions: {0}"), _errorMessage), MessageType.Error);
                 return;
             }
             if (_versions.Count == 0)
             {
-                EditorGUILayout.HelpBox("No versions found. Versions are automatically created after each backup with changes.", MessageType.Info);
+                EditorGUILayout.HelpBox(L.T("vh.none", "No versions found. Versions are automatically created after each backup with changes."), MessageType.Info);
                 return;
             }
             // Stats
-            EditorGUILayout.LabelField($"Total Versions: {_versions.Count}", EditorStyles.miniBoldLabel);
+            EditorGUILayout.LabelField(string.Format(L.T("vh.total", "Total Versions: {0}"), _versions.Count), EditorStyles.miniBoldLabel);
             // Versions list
             _scrollPosition = EditorGUILayout.BeginScrollView(_scrollPosition);
             for (int i = 0; i < _versions.Count; i++)
@@ -81,29 +81,29 @@ namespace AvatarSmartBackup
                 EditorGUILayout.BeginVertical("box");
                 // Version header
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField($"Version #{version.id}", EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(string.Format(L.T("vh.version.header", "Version #{0}"), version.id), EditorStyles.boldLabel);
                 if (isMostRecent)
                 {
                     GUI.contentColor = Color.green;
-                    EditorGUILayout.LabelField("Latest", EditorStyles.miniBoldLabel, GUILayout.Width(50));
+                    EditorGUILayout.LabelField(L.T("vh.latest", "Latest"), EditorStyles.miniBoldLabel, GUILayout.Width(50));
                     GUI.contentColor = Color.white;
                 }
                 EditorGUILayout.EndHorizontal();
                 // Version details
-                EditorGUILayout.LabelField($"Description: {version.description}", EditorStyles.miniLabel);
-                EditorGUILayout.LabelField($"Created: {version.timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")}", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(string.Format(L.T("vh.desc", "Description: {0}"), version.description), EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(L.T("vh.created", "Created:") + " " + version.timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"), EditorStyles.miniLabel);
                 // Actions
                 EditorGUILayout.BeginHorizontal();
-                if (GUILayout.Button("Restore to This Version", GUILayout.Height(25)))
+                if (GUILayout.Button(L.T("vh.restore", "Restore to This Version"), GUILayout.Height(25)))
                 {
-                    if (EditorUtility.DisplayDialog("Confirm Restore",
-                        $"Are you sure you want to restore to version #{version.id}?\n\nDescription: {version.description}\nCreated: {version.timestamp.ToLocalTime()}\n\nThis will replace your current Assets with the backup from this version.",
-                        "Restore", "Cancel"))
+                    if (EditorUtility.DisplayDialog(L.T("vh.restore.confirm.title", "Confirm Restore"),
+                        string.Format(L.T("vh.restore.confirm.body", "Are you sure you want to restore to version #{0}?\n\nDescription: {1}\nCreated: {2}\n\nThis will replace your current Assets with the backup from this version."), version.id, version.description, version.timestamp.ToLocalTime()),
+                        L.T("vh.restore.confirm.ok", "Restore"), L.T("vh.restore.confirm.cancel", "Cancel")))
                     {
                         PerformRestore(version);
                     }
                 }
-                if (GUILayout.Button("Open Folder", GUILayout.Width(100), GUILayout.Height(25)))
+                if (GUILayout.Button(L.T("vh.open.folder", "Open Folder"), GUILayout.Width(100), GUILayout.Height(25)))
                 {
                     string versionDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{version.id:D3}");
                     if (Directory.Exists(versionDir))
@@ -112,7 +112,7 @@ namespace AvatarSmartBackup
                     }
                     else
                     {
-                        EditorUtility.DisplayDialog("Folder Not Found", "The version folder could not be found.", "OK");
+                        EditorUtility.DisplayDialog(L.T("vh.folder.notfound.title", "Folder Not Found"), L.T("vh.folder.notfound.body", "The version folder could not be found."), "OK");
                     }
                 }
                 EditorGUILayout.EndHorizontal();
@@ -122,7 +122,7 @@ namespace AvatarSmartBackup
             EditorGUILayout.EndScrollView();
             // Footer info
             EditorGUILayout.Space(10);
-            EditorGUILayout.HelpBox("💡 Tip: Versions are automatically cleaned up to keep only the 10 most recent ones.", MessageType.Info);
+            EditorGUILayout.HelpBox(L.T("vh.tip.cleanup", "💡 Tip: Versions are automatically cleaned up to keep only the 10 most recent ones."), MessageType.Info);
         }
         void PerformRestore(VersionInfo version)
         {
@@ -134,21 +134,21 @@ namespace AvatarSmartBackup
                 if (Directory.Exists(backupPath))
                 {
                     EditorUtility.RevealInFinder(backupPath);
-                    EditorUtility.DisplayDialog("Restore Location",
-                        $"The backup files for version #{version.id} are located at:\n\n{backupPath}\n\nYou can manually copy the files back to your Assets folder if needed.",
+                    EditorUtility.DisplayDialog(L.T("vh.restore.location.title", "Restore Location"),
+                        string.Format(L.T("vh.restore.location.body", "The backup files for version #{0} are located at:\n\n{1}\n\nYou can manually copy the files back to your Assets folder if needed."), version.id, backupPath),
                         "OK");
                 }
                 else
                 {
-                    EditorUtility.DisplayDialog("Backup Not Found",
-                        $"The backup folder for version #{version.id} could not be found at:\n\n{backupPath}",
+                    EditorUtility.DisplayDialog(L.T("vh.restore.notfound.title", "Backup Not Found"),
+                        string.Format(L.T("vh.restore.notfound.body", "The backup folder for version #{0} could not be found at:\n\n{1}"), version.id, backupPath),
                         "OK");
                 }
             }
             catch (Exception ex)
             {
-                EditorUtility.DisplayDialog("Restore Failed", $"Failed to restore version: {ex.Message}", "OK");
-                Debug.LogError($"Restore failed: {ex.Message}");
+                EditorUtility.DisplayDialog(L.T("vh.restore.failed.title", "Restore Failed"), string.Format(L.T("vh.restore.failed.body", "Failed to restore version: {0}"), ex.Message), "OK");
+                Debug.LogError("Restore failed: " + ex.Message);
             }
         }
     }

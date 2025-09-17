@@ -5,7 +5,7 @@ namespace AvatarSmartBackup.Localization
 {
     public static class LanguageMenu
     {
-        const string Root = "Tools/Avatar Smart Backups/Language/";
+    const string Root = "Avatar Smart Backup/Language/";
 
         [MenuItem(Root + "English", priority = 10)]
         public static void SetEnglish()
