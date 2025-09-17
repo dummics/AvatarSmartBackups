@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using AvatarSmartBackup.Localization;
 namespace AvatarSmartBackup
 {
     public class VersionHistoryWindow : EditorWindow
@@ -52,7 +53,7 @@ namespace AvatarSmartBackup
                 RefreshVersions();
             }
             EditorGUILayout.EndHorizontal();
-            EditorGUILayout.HelpBox("Versions can be full checkpoints or incrementals. Incremental versions are automatically reconstructed from the nearest checkpoint.", MessageType.Info);
+            EditorGUILayout.HelpBox(L.T("window.version.history.help", "Versions are of two types: full checkpoints and incremental. Incremental versions store only changes since the previous checkpoint."), MessageType.Info);
             // Status
             if (_isLoading)
             {

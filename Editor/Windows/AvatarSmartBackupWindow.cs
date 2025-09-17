@@ -50,7 +50,7 @@ namespace AvatarSmartBackup
         [MenuItem("Tools/Avatar Smart Backup")]
         public static void Open()
         {
-            var w = GetWindow<AvatarSmartBackupWindow>(true, "Avatar Smart Backup");
+            var w = GetWindow<AvatarSmartBackupWindow>(true, AvatarSmartBackup.Localization.L.T("window.main.title", "Avatar Smart Backup"));
             w.minSize = new Vector2(320, 320);
             w.Show();
         }
@@ -68,7 +68,7 @@ namespace AvatarSmartBackup
                 if (_settings == null) _settings = BackupManager.LoadSettings();
                 EditorGUI.BeginChangeCheck();
                 // Tabs
-                string[] tabs = { "Backup", "Versions" };
+                string[] tabs = { AvatarSmartBackup.Localization.L.T("ui.tabs.backup", "Backup"), AvatarSmartBackup.Localization.L.T("ui.tabs.versions", "Versions") };
                 if (!_settings._uiTabInitialized) { _settings._activeTab = 0; _settings._uiTabInitialized = true; }
                 _settings._activeTab = GUILayout.Toolbar(_settings._activeTab, tabs);
                 EditorGUILayout.Space(4);
@@ -91,13 +91,13 @@ namespace AvatarSmartBackup
         }
         void DrawBackupTab()
         {
-            EditorGUILayout.LabelField("Avatar Smart Backup", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("Automatic safety copies run in the background. Use 'Backup Now' to force one (throttled).", MessageType.Info);
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("window.main.header", "Avatar Smart Backup"), EditorStyles.boldLabel);
+            EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("window.main.autobackup.help", "Automatic safety copies run in the background. Use 'Backup Now' to force one (throttled)."), MessageType.Info);
             DrawSchedulerSection();
             DrawPrimaryActions();
             DrawVersionsOverview();
             EditorGUILayout.Space();
-            bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent("Advanced Mode", "Show advanced options (filters, performance, verify, retention)."), _settings.AdvancedMode);
+            bool newAdvanced = EditorGUILayout.ToggleLeft(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.advancedMode", "Advanced Mode"), AvatarSmartBackup.Localization.L.T("ui.advancedMode.tooltip", "Show advanced options (filters, performance, verify, retention).")), _settings.AdvancedMode);
             if (newAdvanced != _settings.AdvancedMode)
             {
                 _settings.AdvancedMode = newAdvanced;
@@ -112,13 +112,13 @@ namespace AvatarSmartBackup
         void DrawSchedulerSection()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Automatic Backups", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.autobackups.title", "Automatic Backups"), EditorStyles.boldLabel);
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
             bool running = Session.IsRunning;
             Color prev = GUI.backgroundColor;
             GUI.backgroundColor = running ? new Color(0.25f, 0.55f, 0.25f, 1f) : new Color(0.45f, 0.2f, 0.2f, 1f);
-            if (GUILayout.Button(new GUIContent(running ? "Automatic Backups: ON" : "Automatic Backups: OFF", "Toggle background backup scheduler"), GUILayout.Width(220), GUILayout.Height(30)))
+            if (GUILayout.Button(new GUIContent(running ? AvatarSmartBackup.Localization.L.T("ui.autobackups.on", "Automatic Backups: ON") : AvatarSmartBackup.Localization.L.T("ui.autobackups.off", "Automatic Backups: OFF"), AvatarSmartBackup.Localization.L.T("ui.autobackups.toggle.tt", "Toggle background backup scheduler")), GUILayout.Width(220), GUILayout.Height(30)))
             {
                 if (running) TimerService.PauseTimer();
                 else TimerService.StartTimerIfNeeded(_settings);
@@ -127,7 +127,14 @@ namespace AvatarSmartBackup
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             EditorGUILayout.Space(2);
-            EditorGUILayout.LabelField($"Next: {Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--"}    Last: {Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "never"}");
+            {
+                var nextLabel = AvatarSmartBackup.Localization.L.T("ui.autobackups.next", "Next");
+                var lastLabel = AvatarSmartBackup.Localization.L.T("ui.autobackups.last", "Last");
+                var never = AvatarSmartBackup.Localization.L.T("ui.never", "never");
+                var nextStr = Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--";
+                var lastStr = Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? never;
+                EditorGUILayout.LabelField($"{nextLabel}: {nextStr}    {lastLabel}: {lastStr}");
+            }
             if (_settings.AdvancedMode)
             {
                 EditorGUILayout.Space(4);
@@ -141,7 +148,7 @@ namespace AvatarSmartBackup
                     {
                         double minutesNeeded = secNeeded / 60.0;
                         double mb = _settings.lastBackupBytes / (1024.0 * 1024.0);
-                        EditorGUILayout.HelpBox($"At {effCopy} MB/s, backing up {mb:0.0} MB takes ~{minutesNeeded:0.0} min, exceeding the interval.", MessageType.Warning);
+                        EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("warn.backup.speed", "At {0} MB/s, backing up {1:0.0} MB takes ~{2:0.0} min, exceeding the interval.", effCopy, mb, minutesNeeded), MessageType.Warning);
                     }
                 }
             }
@@ -155,9 +162,9 @@ namespace AvatarSmartBackup
         void DrawIntervalControls()
         {
             EditorGUILayout.BeginHorizontal();
-            string[] unitOptions = { "min", "sec" };
+            string[] unitOptions = { AvatarSmartBackup.Localization.L.T("ui.interval.min", "min"), AvatarSmartBackup.Localization.L.T("ui.interval.sec", "sec") };
             int currentUnitIndex = _settings.intervalInSeconds ? 1 : 0;
-            EditorGUILayout.LabelField("Interval", GUILayout.Width(60));
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.interval.label", "Interval"), GUILayout.Width(60));
             int maxValue = _settings.intervalInSeconds ? 3600 : 240;
             int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_settings.intervalMinutes, GUILayout.Width(70)), 1, maxValue);
             if (newInterval != _settings.intervalMinutes)
