@@ -311,13 +311,26 @@ namespace AvatarSmartBackup
                 string abs = scan.AbsolutePath;
                 string guid = FileUtilEx.TryReadGuidFromMeta(abs) ?? string.Empty;
 
+                string computedMd5 = null;
+                bool hashComputed = false;
+                try
+                {
+                    computedMd5 = FileUtilEx.MD5Of(abs);
+                    hashComputed = !string.IsNullOrEmpty(computedMd5);
+                }
+                catch (Exception ex)
+                {
+                    if (s?.DiagnosticsEnabled == true)
+                        Log.Warn($"MD5 failed for {rel}: {ex.Message}. Falling back to timestamp/size compare.");
+                }
+
                 var entry = new ManifestEntry
                 {
                     guid = guid,
                     relPath = rel,
                     size = scan.Size,
                     lastWriteUtcTicks = scan.LastWriteUtcTicks,
-                    md5 = null
+                    md5 = computedMd5
                 };
 
                 ManifestEntry prevEntry = null;
@@ -327,9 +340,19 @@ namespace AvatarSmartBackup
                     prevByRel.TryGetValue(rel, out prevEntry);
 
                 string prevRelPath = prevEntry?.relPath;
-                if (prevEntry != null && prevEntry.size == scan.Size && prevEntry.lastWriteUtcTicks == scan.LastWriteUtcTicks)
+                bool canReuseCachedCopy = false;
+                if (hashComputed)
+                {
+                    if (prevEntry != null && !string.IsNullOrEmpty(prevEntry.md5) &&
+                        string.Equals(prevEntry.md5, computedMd5, StringComparison.OrdinalIgnoreCase))
+                    {
+                        canReuseCachedCopy = true;
+                    }
+                }
+                else if (prevEntry != null && prevEntry.size == scan.Size && prevEntry.lastWriteUtcTicks == scan.LastWriteUtcTicks)
                 {
                     entry.md5 = prevEntry.md5;
+                    canReuseCachedCopy = true;
                 }
 
                 if (prevEntry != null && !string.IsNullOrEmpty(prevEntry.relPath))
@@ -338,7 +361,7 @@ namespace AvatarSmartBackup
                         added.Add(prevEntry.relPath);
                 }
 
-                bool needsCopy = string.IsNullOrEmpty(entry.md5);
+                bool needsCopy = !canReuseCachedCopy;
                 string destination = Path.Combine(CurrentDir, rel);
                 if (!needsCopy && prevEntry != null && !string.Equals(prevEntry.relPath, rel, StringComparison.OrdinalIgnoreCase))
                 {
@@ -362,7 +385,7 @@ namespace AvatarSmartBackup
                 manifest.entries.Add(entry);
                 added.Add(rel);
 
-                // No v2 entry/hashing; still queue file item for MD5 if needed for manifest
+                // Hashing now happens during planning; FilePlanItem keeps bookkeeping aligned with copy stage
                 files.Add(new FilePlanItem
                 {
                     Scan = scan,
@@ -638,7 +661,7 @@ namespace AvatarSmartBackup
                     }
                 }
 
-                // 3) Hashing stage removed (legacy manifest_v2 removed). Keep MD5 reuse via manifest entries only.
+                // 3) Hashing stage now folded into planning (legacy manifest_v2 removed). Manifest entries already carry MD5 values.
 
                 // 4) Manifest + prune (nevern thread)
                 PruneRemoved(man);
