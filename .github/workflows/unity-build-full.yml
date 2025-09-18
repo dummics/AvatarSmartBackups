@@ -194,25 +194,24 @@ jobs:
               # ---- Build ----
               dotnet restore "$PROJ"
               echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
+              # Output deterministico per evitare ricerche successive
+              OUTDIR="build/core"
+              mkdir -p "$OUTDIR"
               dotnet build "$PROJ" -c Release \
                 -p:UNITY_MANAGED="$UNITY_MANAGED" \
-                -p:WarningsAsErrors=false
+                -p:WarningsAsErrors=false \
+                -p:AppendTargetFrameworkToOutputPath=false \
+                -o "$OUTDIR"
 
-              # ---- TROVA la DLL prodotta (robusto) ----
-              OUTDIR="$(dirname "$PROJ")/bin/Release"
-              echo "Search built DLL under: $OUTDIR"
-              FOUND_DLL="$(find "$OUTDIR" -type f -name "AvatarSmartBackups.Core.dll" | head -n1 || true)"
-              if [ -z "$FOUND_DLL" ]; then
-                echo "WARNING: AvatarSmartBackups.Core.dll not found by name; listing DLLs for debug:"
-                find "$OUTDIR" -maxdepth 4 -type f -name "*.dll" -exec ls -la {} \;
-                # Fallback: prendi la dll più grande nell'output
-                FOUND_DLL="$(find "$OUTDIR" -type f -name "*.dll" -exec ls -l {} \; | awk '{print $5 " " $9}' | sort -nr | head -n1 | cut -d' ' -f2-)"
-              fi
-              if [ -z "$FOUND_DLL" ] || [ ! -f "$FOUND_DLL" ]; then
-                echo "ERROR: Compiled DLL not found."
+              # ---- Verifica la DLL prodotta nella cartella deterministica ----
+              DLL="$OUTDIR/AvatarSmartBackups.Core.dll"
+              if [ ! -f "$DLL" ]; then
+                echo "ERROR: Expected DLL not found at $DLL"
+                echo "Listing DLLs under $OUTDIR for debug:"
+                find "$OUTDIR" -type f -name "*.dll" -exec ls -la {} \; 2>/dev/null || true
                 exit 1
               fi
-              echo "Using built DLL: $FOUND_DLL"
+              echo "Using built DLL: $DLL"
 
               # ---- Prepara Editor/ e copia la DLL con nome fisso ----
               rm -rf Editor || true
@@ -236,7 +235,7 @@ jobs:
               EOF
 
               # copia la DLL (niente install -m)
-              cp -f "$FOUND_DLL" "Editor/AvatarSmartBackups.Core.dll"
+              cp -f "$DLL" "Editor/AvatarSmartBackups.Core.dll"
 
               echo "Editor folder content after copy (inside container):"
               ls -la Editor
