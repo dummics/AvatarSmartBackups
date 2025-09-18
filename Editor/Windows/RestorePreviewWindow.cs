@@ -909,7 +909,7 @@ namespace AvatarSmartBackup
                 }
                 catch (Exception ex)
                 {
-                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepareVersion.fail", "Failed to prepare version data:
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepareVersion.fail", @"Failed to prepare version data:
 {0}"), ex.Message), "OK");
                     return;
                 }
@@ -1001,7 +1001,7 @@ namespace AvatarSmartBackup
             }
             else
             {
-                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.copy.done", "Files copied: {0}
+                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.copy.done", @"Files copied: {0}
 Destination: {1}"), restored, targetRoot), "OK");
                 if (!string.IsNullOrEmpty(targetRoot))
                     EditorUtility.RevealInFinder(targetRoot);
