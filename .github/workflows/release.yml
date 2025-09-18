@@ -77,7 +77,12 @@ jobs:
             find Editor -name "*.cs" | head -10
             echo "=================================="
             export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
-            dotnet --info || true
+            # Install .NET SDK 8 inside the container
+            curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+            chmod +x dotnet-install.sh
+            ./dotnet-install.sh --channel 8.0
+            export PATH=$HOME/.dotnet:$PATH
+            dotnet --info
             dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
 
       - name: Integrate DLL in package (clean Editor/ and inject asmdef that references DLL)
