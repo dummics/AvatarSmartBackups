@@ -180,6 +180,26 @@ namespace AvatarSmartBackup
                         v.backupPath = Path.Combine(_versionsRoot, $"v{v.id:D3}");
                         changed = true;
                     }
+                    if (v.corrupt && !v.corrupted)
+                    {
+                        v.corrupted = true;
+                        changed = true;
+                    }
+                    if (v.corrupted && !v.corrupt)
+                    {
+                        v.corrupt = true;
+                        changed = true;
+                    }
+                    if (string.IsNullOrEmpty(v.corruptionReason))
+                    {
+                        v.corruptionReason = string.Empty;
+                        changed = true;
+                    }
+                    if (string.IsNullOrEmpty(v.lastCorruptionUtc))
+                    {
+                        v.lastCorruptionUtc = string.Empty;
+                        changed = true;
+                    }
                 }
                 index.schemaVersion = VersionIndex.CurrentSchemaVersion;
                 changed = true;
@@ -273,6 +293,9 @@ namespace AvatarSmartBackup
                     incomplete = false,
                     toolVersion = 1,
                     corrupt = false,
+                    corrupted = false,
+                    corruptionReason = string.Empty,
+                    lastCorruptionUtc = string.Empty,
                     isCheckpoint = isCheckpoint,
                     parentId = parentId,
                     checkpointId = checkpointId,
@@ -601,6 +624,10 @@ namespace AvatarSmartBackup
                 catch
                 {
                     v.corrupt = true;
+                    v.corrupted = true;
+                    if (string.IsNullOrEmpty(v.corruptionReason))
+                        v.corruptionReason = "Manifest load failed";
+                    v.lastCorruptionUtc = DateTime.UtcNow.ToString("o");
                     changed = true;
                 }
             }
@@ -700,9 +727,26 @@ namespace AvatarSmartBackup
                     version.corrupt = true;
                     changed = true;
                 }
+                if (!version.corrupted)
+                {
+                    version.corrupted = true;
+                    changed = true;
+                }
                 if (markIncomplete && !version.incomplete)
                 {
                     version.incomplete = true;
+                    changed = true;
+                }
+
+                if (!string.IsNullOrEmpty(reason) && !string.Equals(version.corruptionReason, reason, StringComparison.Ordinal))
+                {
+                    version.corruptionReason = reason;
+                    changed = true;
+                }
+                string timestamp = DateTime.UtcNow.ToString("o");
+                if (string.IsNullOrEmpty(version.lastCorruptionUtc) || !string.Equals(version.lastCorruptionUtc, timestamp, StringComparison.Ordinal))
+                {
+                    version.lastCorruptionUtc = timestamp;
                     changed = true;
                 }
 
@@ -710,7 +754,10 @@ namespace AvatarSmartBackup
                     SaveIndex(index);
 
                 if (!string.IsNullOrEmpty(reason))
+                {
                     Debug.LogError($"[ASB] Version #{id} marked as corrupt: {reason}");
+                    Log.Warn($"Version #{id} marked as corrupt: {reason}");
+                }
             }
             catch (Exception ex)
             {
@@ -881,6 +928,9 @@ namespace AvatarSmartBackup
         public bool incomplete;
         public int toolVersion;
         public bool corrupt;
+        public bool corrupted;
+        public string corruptionReason;
+        public string lastCorruptionUtc;
         public bool isCheckpoint;
         public int parentId;
         public int checkpointId;
@@ -897,7 +947,7 @@ namespace AvatarSmartBackup
     [Serializable]
     public class VersionIndex
     {
-        public static int CurrentSchemaVersion = 4;
+        public static int CurrentSchemaVersion = 5;
         public int schemaVersion;
         public List<VersionInfo> versions;
     }

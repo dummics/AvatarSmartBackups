@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using AvatarSmartBackup.Localization;
 using UnityEngine;
 
 namespace AvatarSmartBackup
@@ -10,41 +12,134 @@ namespace AvatarSmartBackup
     {
         static readonly object RebuildLock = new object();
         static string _lastWarning;
+        static RestorePreparationResult _lastResult;
 
         public static string LastWarning => _lastWarning;
+        public static RestorePreparationResult LastResult => _lastResult;
 
         static string RebuildRoot => Path.Combine(FileUtilEx.ProjectRoot, "Temp", "ASB_Rebuilds");
 
         public static string PrepareSnapshot(int versionId, bool forceRebuild = false)
         {
+            _lastResult = null;
+            var result = PrepareSnapshotInternal(versionId, forceRebuild);
+            _lastResult = result;
+            _lastWarning = result?.Message;
+            return result?.SnapshotPath;
+        }
+
+        static RestorePreparationResult PrepareSnapshotInternal(int versionId, bool forceRebuild)
+        {
             _lastWarning = null;
+            var notices = new List<string>();
             using var vm = new FileBasedVersionManager();
-            var version = vm.GetVersion(versionId);
-            if (version == null)
+            var requested = vm.GetVersion(versionId);
+            if (requested == null)
                 throw new InvalidOperationException($"Version #{versionId} not found.");
+
+            var corruptedVersions = new HashSet<int>();
+            var skippedVersions = new HashSet<int>();
+            var skipHistory = new List<int>();
+            bool fallbackUsed = false;
+            VersionInfo attempt = requested;
+            int guard = 0;
+
+            while (attempt != null && guard++ < 64)
+            {
+                try
+                {
+                    string path = PrepareSingleVersion(vm, attempt, forceRebuild || skippedVersions.Count > 0, skippedVersions);
+                    var result = new RestorePreparationResult
+                    {
+                        RequestedVersionId = versionId,
+                        ResolvedVersionId = attempt.id,
+                        SnapshotPath = path,
+                        AutoHealed = skippedVersions.Count > 0,
+                        UsedFallback = fallbackUsed,
+                        CorruptedVersions = corruptedVersions.ToList(),
+                        SkippedVersions = skipHistory.ToList(),
+                        Message = notices.Count > 0 ? string.Join("\n", notices) : null
+                    };
+
+                    if (!string.IsNullOrEmpty(result.Message))
+                        Log.Warn($"Restore advisory: {result.Message}");
+
+                    return result;
+                }
+                catch (VersionRestoreException vex)
+                {
+                    corruptedVersions.Add(vex.FailingVersionId);
+
+                    if (vex.FailingVersionId != attempt.id)
+                    {
+                        if (!skippedVersions.Contains(vex.FailingVersionId))
+                        {
+                            skippedVersions.Add(vex.FailingVersionId);
+                            skipHistory.Add(vex.FailingVersionId);
+                            string healMsg = L.T("rp.restore.autoheal", "Auto-heal applied: skipped corrupt version v{0:D3}. Reason: {1}", vex.FailingVersionId, vex.UserFriendlyReason);
+                            notices.Add(healMsg);
+                            Log.Warn($"[ASB] {healMsg}");
+                        }
+                        continue;
+                    }
+
+                    // Target itself is corrupt - try fallback
+                    fallbackUsed = true;
+                    skippedVersions.Clear();
+                    skipHistory.Clear();
+
+                    var fallback = FindPreviousValidVersion(vm, attempt.id - 1, corruptedVersions);
+                    if (fallback != null)
+                    {
+                        string fallbackMsg = L.T("rp.restore.fallback", "Restore for v{0:D3} failed ({1}). Falling back to v{2:D3}.", attempt.id, vex.UserFriendlyReason, fallback.id);
+                        notices.Add(fallbackMsg);
+                        Log.Warn($"[ASB] {fallbackMsg}");
+                        attempt = fallback;
+                        continue;
+                    }
+
+                    string failMsg = L.T("rp.restore.fallback.fail", "Restore for v{0:D3} failed and no fallback version was available.", attempt.id);
+                    Log.Error($"{failMsg} Reason: {vex.UserFriendlyReason}");
+                    throw new InvalidOperationException($"{failMsg} {vex.UserFriendlyReason}", vex);
+                }
+            }
+
+            throw new InvalidOperationException($"Restore attempts exceeded for version #{versionId}.");
+        }
+
+        static string PrepareSingleVersion(FileBasedVersionManager vm, VersionInfo version, bool forceRebuild, HashSet<int> skipVersions)
+        {
+            if (version == null)
+                throw new ArgumentNullException(nameof(version));
 
             if (version.isCheckpoint)
             {
                 string checkpointDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{version.id:D3}");
                 if (!Directory.Exists(checkpointDir))
-                    throw new InvalidOperationException($"Checkpoint directory missing: {checkpointDir}");
+                {
+                    string reason = $"Checkpoint directory missing: {checkpointDir}";
+                    vm?.MarkVersionCorrupt(version.id, markIncomplete: true, reason: reason);
+                    throw new VersionRestoreException(version.id, version.id, reason);
+                }
                 return checkpointDir;
             }
 
             lock (RebuildLock)
             {
                 string rebuildDir = Path.Combine(RebuildRoot, $"v{version.id:D3}");
+                bool needRebuild = forceRebuild || (skipVersions != null && skipVersions.Count > 0);
 
-                if (forceRebuild && Directory.Exists(rebuildDir))
+                if (needRebuild && Directory.Exists(rebuildDir))
                 {
-                    try { Directory.Delete(rebuildDir, true); } catch (Exception ex) { Debug.LogWarning($"[ASB] Failed to clear rebuild dir: {ex.Message}"); }
+                    try { Directory.Delete(rebuildDir, true); }
+                    catch (Exception ex) { Debug.LogWarning($"[ASB] Failed to clear rebuild dir: {ex.Message}"); }
                 }
 
-                if (!forceRebuild && Directory.Exists(rebuildDir))
+                if (!needRebuild && Directory.Exists(rebuildDir))
                     return rebuildDir;
 
                 Directory.CreateDirectory(RebuildRoot);
-                BuildSnapshot(vm, version, rebuildDir);
+                BuildSnapshot(vm, version, rebuildDir, skipVersions);
                 return rebuildDir;
             }
         }
@@ -56,7 +151,7 @@ namespace AvatarSmartBackup
             return LoadDeltaMetadata(versionDir);
         }
 
-        static void BuildSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir)
+        static void BuildSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir, HashSet<int> skipVersions = null)
         {
             var chain = BuildChain(vm, target);
             if (chain.Count == 0)
@@ -75,6 +170,8 @@ namespace AvatarSmartBackup
             for (int i = 1; i < chain.Count; i++)
             {
                 var current = chain[i];
+                if (skipVersions != null && skipVersions.Contains(current.id))
+                    continue;
                 string versionDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{current.id:D3}");
                 string deltaRoot = Path.Combine(versionDir, "delta");
                 string deltaMetadataPath = Path.Combine(versionDir, "delta.json");
@@ -195,13 +292,10 @@ namespace AvatarSmartBackup
 
         static void FailDeltaRebuild(FileBasedVersionManager vm, VersionInfo target, VersionInfo failingVersion, string reason)
         {
-            _lastWarning = reason;
             vm?.MarkVersionCorrupt(failingVersion.id, markIncomplete: true, reason: reason);
-            if (target != null && target.id != failingVersion.id)
-                vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
             Log.Error(reason);
             Debug.LogError($"[ASB] {reason}");
-            throw new InvalidOperationException(reason);
+            throw new VersionRestoreException(target?.id ?? failingVersion.id, failingVersion.id, reason);
         }
 
         static void ValidateRebuiltSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir)
@@ -225,7 +319,7 @@ namespace AvatarSmartBackup
                 vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
                 Log.Error(reason);
                 Debug.LogError($"[ASB] {reason}");
-                throw new InvalidOperationException(reason, ex);
+                throw new VersionRestoreException(target.id, target.id, reason, ex);
             }
 
             if (manifest?.entries == null)
@@ -234,7 +328,7 @@ namespace AvatarSmartBackup
                 vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
                 Log.Error(reason);
                 Debug.LogError($"[ASB] {reason}");
-                throw new InvalidOperationException(reason);
+                throw new VersionRestoreException(target.id, target.id, reason);
             }
 
             foreach (var entry in manifest.entries)
@@ -249,7 +343,7 @@ namespace AvatarSmartBackup
                     vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
                     Log.Error(reason);
                     Debug.LogError($"[ASB] {reason}");
-                    throw new InvalidOperationException(reason);
+                    throw new VersionRestoreException(target.id, target.id, reason);
                 }
 
                 if (string.IsNullOrEmpty(entry.md5))
@@ -264,7 +358,7 @@ namespace AvatarSmartBackup
                         vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
                         Log.Error(reason);
                         Debug.LogError($"[ASB] {reason}");
-                        throw new InvalidOperationException(reason);
+                        throw new VersionRestoreException(target.id, target.id, reason);
                     }
                 }
                 catch (Exception ex)
@@ -273,7 +367,7 @@ namespace AvatarSmartBackup
                     vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
                     Log.Error(reason);
                     Debug.LogError($"[ASB] {reason}");
-                    throw new InvalidOperationException(reason, ex);
+                    throw new VersionRestoreException(target.id, target.id, reason, ex);
                 }
             }
         }
@@ -283,6 +377,51 @@ namespace AvatarSmartBackup
             var ru = new Uri(Path.GetFullPath(root) + Path.DirectorySeparatorChar);
             var pu = new Uri(Path.GetFullPath(path));
             return Uri.UnescapeDataString(ru.MakeRelativeUri(pu).ToString()).Replace('/', Path.DirectorySeparatorChar);
+        }
+
+        static VersionInfo FindPreviousValidVersion(FileBasedVersionManager vm, int startId, HashSet<int> exclude)
+        {
+            if (vm == null) return null;
+            int candidateId = Math.Max(0, startId);
+            while (candidateId > 0)
+            {
+                var candidate = vm.GetVersion(candidateId);
+                if (candidate != null)
+                {
+                    bool excluded = exclude != null && exclude.Contains(candidate.id);
+                    if (!excluded && !candidate.corrupt && !candidate.incomplete && !candidate.corrupted)
+                        return candidate;
+                }
+                candidateId--;
+            }
+            return null;
+        }
+    }
+
+    internal class RestorePreparationResult
+    {
+        public int RequestedVersionId { get; set; }
+        public int ResolvedVersionId { get; set; }
+        public string SnapshotPath { get; set; }
+        public bool AutoHealed { get; set; }
+        public bool UsedFallback { get; set; }
+        public List<int> CorruptedVersions { get; set; } = new List<int>();
+        public List<int> SkippedVersions { get; set; } = new List<int>();
+        public string Message { get; set; }
+    }
+
+    internal class VersionRestoreException : Exception
+    {
+        public int TargetVersionId { get; }
+        public int FailingVersionId { get; }
+        public string UserFriendlyReason { get; }
+
+        public VersionRestoreException(int targetVersionId, int failingVersionId, string reason, Exception inner = null)
+            : base(reason, inner)
+        {
+            TargetVersionId = targetVersionId;
+            FailingVersionId = failingVersionId;
+            UserFriendlyReason = reason;
         }
     }
 }
