@@ -144,10 +144,12 @@ jobs:
               export DOTNET_CLI_TELEMETRY_OPTOUT=1
               export DOTNET_NOLOGO=1
 
-              # Verifica struttura Unity nell'immagine
+              # Verifica struttura Unity nell immagine (info diagnostiche)
               echo "=== Unity Installation Check ==="
-              # (MODIFICATO) la tua immagine light porta le DLL in /unity/Managed
-              ls -la /unity/Managed | head -50 || true
+              for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
+                echo "Trying: $d"
+                ls -la "$d" 2>/dev/null | head -20 || true
+              done
               echo "================================"
 
               # dotnet SDK (usa cache montata in /root/.dotnet)
@@ -164,35 +166,58 @@ jobs:
               # >>> aggiorna se il .csproj cambia percorso <<<
               PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
 
-              # Imposta la variabile UNITY_MANAGED per i riferimenti Unity
-              # (MODIFICATO) usa il path della tua immagine custom
-              export UNITY_MANAGED="/unity/Managed"
-              echo "UNITY_MANAGED set to: $UNITY_MANAGED"
-              
-              # Verifica che le DLL Unity esistano
-              echo "Verifying Unity DLLs exist..."
-              # UnityEditor.dll (necessaria per editor-only)
-              if [ ! -f "$UNITY_MANAGED/UnityEditor.dll" ]; then
-                echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"
+              # ---- AUTO-DETECT UNITY_MANAGED ----
+              UNITY_MANAGED=""
+              for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
+                if [ -d "$d" ]; then UNITY_MANAGED="$d"; break; fi
+              done
+
+              if [ -z "$UNITY_MANAGED" ]; then
+                echo "UNITY_MANAGED not found in known paths, scanning image..."
+                CAND=$(find / -maxdepth 5 -type f -name "UnityEditor.dll" 2>/dev/null | head -n 1 || true)
+                if [ -n "$CAND" ]; then
+                  UNITY_MANAGED="$(dirname "$CAND")"
+                fi
+              fi
+
+              if [ -z "$UNITY_MANAGED" ] || [ ! -d "$UNITY_MANAGED" ]; then
+                echo "ERROR: Could not locate Unity Managed folder in container."
+                echo "Hint: ensure your image ${UNITY_IMAGE} actually contains the DLLs or bump the tag to avoid stale cache."
+                echo "Debug: Files named UnityEditor.dll in image:"
+                find / -maxdepth 7 -type f -name "UnityEditor.dll" 2>/dev/null || true
                 exit 1
               fi
 
-              # UnityEngine.dll:
-              # Alcuni setup hanno UnityEngine.dll a livello radice,
-              # altri in una sottocartella UnityEngine/UnityEngine.dll.
-              if [ -f "$UNITY_MANAGED/UnityEngine.dll" ]; then
-                echo "Found: $UNITY_MANAGED/UnityEngine.dll"
-              elif [ -f "$UNITY_MANAGED/UnityEngine/UnityEngine.dll" ]; then
-                echo "Found: $UNITY_MANAGED/UnityEngine/UnityEngine.dll"
-                # Se il tuo .csproj punta a $(UNITY_MANAGED)\UnityEngine.dll
-                # e tu tieni il file in sottocartella, valuta di allineare l'HintPath.
-              else
-                echo "ERROR: UnityEngine(.dll) not found in $UNITY_MANAGED"
-                echo "       Expected either $UNITY_MANAGED/UnityEngine.dll"
-                echo "       or $UNITY_MANAGED/UnityEngine/UnityEngine.dll"
+              export UNITY_MANAGED
+              echo "UNITY_MANAGED set to: $UNITY_MANAGED"
+
+              # ---- Verifica DLL necessarie ----
+              echo "Verifying Unity DLLs exist..."
+              if [ ! -f "$UNITY_MANAGED/UnityEditor.dll" ]; then
+                echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"
+                echo "Debug:"
+                find "$UNITY_MANAGED" -maxdepth 3 -name "UnityEditor.dll" || true
                 exit 1
               fi
-              
+
+              # UnityEngine può stare a radice o sotto /UnityEngine/UnityEngine.dll
+              UE_DLL=""
+              if [ -f "$UNITY_MANAGED/UnityEngine.dll" ]; then
+                UE_DLL="$UNITY_MANAGED/UnityEngine.dll"
+              elif [ -f "$UNITY_MANAGED/UnityEngine/UnityEngine.dll" ]; then
+                UE_DLL="$UNITY_MANAGED/UnityEngine/UnityEngine.dll"
+              fi
+
+              if [ -z "$UE_DLL" ]; then
+                echo "ERROR: UnityEngine.dll not found."
+                echo "Debug:"
+                find "$UNITY_MANAGED" -maxdepth 3 -name "UnityEngine.dll" || true
+                exit 1
+              else
+                echo "Found UnityEngine at: $UE_DLL"
+              fi
+              # ---- Fine verifica ----
+
               dotnet restore "$PROJ"
               echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
               dotnet build "$PROJ" -c Release \
@@ -222,6 +247,7 @@ jobs:
               JSON
               cp "$DLL" Editor/
             '
+
 
       - id: pkgzip
         name: Create VPM ZIP (package.json + Editor/*)
