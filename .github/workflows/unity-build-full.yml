@@ -285,11 +285,12 @@ jobs:
         with:
           token: ${{ secrets.DIST_REPO_TOKEN }}
           repository: dummics/unity-smart-backup
-          tag_name: ${{ needs.prepare.outputs.version }}
-          name: ${{ needs.prepare.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           files: artifact/*
-          overwrite: true
+          overwrite_files: true
           generate_release_notes: true
+
 
       - name: Force re-upload assets with gh --clobber [on tag]
         if: startsWith(github.ref, 'refs/tags/')
@@ -321,14 +322,16 @@ jobs:
         working-directory: listing
         run: |
           set -e
-          VER="${{ needs.prepare.outputs.version }}"
+          TAG="${GITHUB_REF#refs/tags/}"                              # es: v1.2.3
+          VER="${{ needs.prepare.outputs.version }}"                   # es: 1.2.3
           NAME="${{ needs.prepare.outputs.pkgname }}"
           ZIPNAME="${NAME}-${VER}.zip"
-          URL="https://github.com/dummics/unity-smart-backup/releases/download/$VER/${ZIPNAME}"
+          URL="https://github.com/dummics/unity-smart-backup/releases/download/${TAG}/${ZIPNAME}"
 
+          # Assicurati che esista il file
           [ -f source.json ] || echo '{"packages":[]}' > source.json
 
-          # Sanitize + update
+          # Sanitize se non è JSON valido
           SAN="source.sanitized.json"
           if ! jq '.' source.json >/dev/null 2>&1; then
             perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
@@ -336,6 +339,7 @@ jobs:
             cp source.json "$SAN"
           fi
 
+          # Update struttura con la nuova release URL
           jq --arg name "$NAME" --arg url "$URL" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
@@ -349,20 +353,22 @@ jobs:
               end
           ' "$SAN" > source.tmp && mv source.tmp source.json
 
+          # Verifica JSON finale
           jq '.' source.json >/dev/null
 
-          # Se non ci sono modifiche, crea comunque un commit vuoto per triggerare i workflow downstream
-          if git diff --quiet; then
+          # Config git e commit (anche vuoto per triggerare workflow downstream)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          if git diff --cached --quiet; then
             echo "Nessuna modifica a source.json; creo un commit vuoto per triggerare il refresh del listing"
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit --allow-empty -m "chore(listing): refresh $NAME v$VER ($(date -u +"%Y-%m-%dT%H:%M:%SZ"))"
           else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add source.json
             git commit -m "Release $NAME v$VER"
           fi
+
+          # Forza remote con PAT e push
+          git remote set-url origin "https://x-access-token:${{ secrets.DIST_REPO_TOKEN }}@github.com/dummics/unity-smart-backup.git"
           git pull --ff-only
           git push origin HEAD:main
 
