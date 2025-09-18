@@ -66,11 +66,28 @@ jobs:
       - name: Build Core DLL
         run: dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
 
-      - name: Integrate DLL in package (put DLL in Editor/ and remove Editor .cs files)
+      - name: Integrate DLL in package (clean Editor/ and inject asmdef that references DLL)
         shell: bash
         run: |
           set -e
+          # Clean Editor folder and recreate it fresh
+          rm -rf Editor || true
           mkdir -p Editor
+          # Create a minimal asmdef that references the precompiled DLL (runtime is Editor only)
+          echo '{'                                   >  Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "name": "AvatarSmartBackups.Editor",'        >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "references": [],'                           >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "includePlatforms": ["Editor"],'           >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "excludePlatforms": [],'                     >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "allowUnsafeCode": false,'                   >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "overrideReferences": false,'                >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "precompiledReferences": ["AvatarSmartBackups.Core.dll"],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "autoReferenced": true,'                     >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "defineConstraints": [],'                    >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "versionDefines": [],'                       >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "noEngineReferences": false'                 >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '}'                                               >> Editor/AvatarSmartBackups.Editor.asmdef
+          # Copy DLL next to the asmdef
           DLL_SRC="src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll"
           if [ ! -f "$DLL_SRC" ]; then
             echo "ERROR: DLL not found at $DLL_SRC"
@@ -78,8 +95,6 @@ jobs:
             exit 1
           fi
           cp "$DLL_SRC" Editor/
-          # Remove any .cs files under Editor
-          find Editor -type f -name "*.cs" -exec rm -f {} + || true
 
       - id: pkgzip
         name: Create VPM ZIP
