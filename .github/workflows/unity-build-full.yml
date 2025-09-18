@@ -291,8 +291,8 @@ jobs:
           overwrite: true
           generate_release_notes: true
 
-      - name: Fallback publish via gh (retry) [on tag]
-        if: startsWith(github.ref, 'refs/tags/') && steps.softprops.outcome != 'success'
+      - name: Force re-upload assets with gh --clobber [on tag]
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
         run: |
@@ -301,15 +301,12 @@ jobs:
           REPO="dummics/unity-smart-backup"
           shopt -s nullglob
           ASSETS=(artifact/*)
-          echo "softprops failed, attempting gh release fallback..."
-          for attempt in 1 2 3; do
-            if gh release view "$VER" --repo "$REPO" >/dev/null 2>&1; then
-              gh release upload "$VER" "${ASSETS[@]}" --repo "$REPO" --clobber && break || true
-            else
-              gh release create "$VER" "${ASSETS[@]}" --repo "$REPO" -t "$VER" -n "$VER" && break || true
-            fi
-            sleep $((attempt*5))
-          done
+          echo "Ensuring release assets are updated (clobber)..."
+          if gh release view "$VER" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$VER" "${ASSETS[@]}" --repo "$REPO" --clobber
+          else
+            gh release create "$VER" "${ASSETS[@]}" --repo "$REPO" -t "$VER" -n "$VER"
+          fi
 
       - name: Checkout listing repo for update (only on tag)
         if: startsWith(github.ref, 'refs/tags/')
@@ -354,15 +351,18 @@ jobs:
 
           jq '.' source.json >/dev/null
 
+          # Se non ci sono modifiche, crea comunque un commit vuoto per triggerare i workflow downstream
           if git diff --quiet; then
-            echo "Nessuna modifica a source.json, salto commit/push"
-            exit 0
+            echo "Nessuna modifica a source.json; creo un commit vuoto per triggerare il refresh del listing"
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore(listing): refresh $NAME v$VER ($(date -u +"%Y-%m-%dT%H:%M:%SZ"))"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add source.json
+            git commit -m "Release $NAME v$VER"
           fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add source.json
-          git commit -m "Release $NAME v$VER"
           git pull --ff-only
           git push origin HEAD:main
 
