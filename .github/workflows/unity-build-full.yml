@@ -204,9 +204,9 @@ jobs:
               FOUND_DLL="$(find "$OUTDIR" -type f -name "AvatarSmartBackups.Core.dll" | head -n1 || true)"
               if [ -z "$FOUND_DLL" ]; then
                 echo "WARNING: AvatarSmartBackups.Core.dll not found by name; listing DLLs for debug:"
-                find "$OUTDIR" -maxdepth 4 -type f -name "*.dll" -printf "%p (%s bytes)\n" | sed -e "s#^#  #"
-                # Fallback: prendi la dll più grande nell output
-                FOUND_DLL="$(find "$OUTDIR" -type f -name "*.dll" -printf "%s %p\n" | sort -nr | awk "NR==1{print \$2}")"
+                find "$OUTDIR" -maxdepth 4 -type f -name "*.dll" -exec ls -la {} \;
+                # Fallback: prendi la dll più grande nell'output
+                FOUND_DLL="$(find "$OUTDIR" -type f -name "*.dll" -exec ls -l {} \; | awk '{print $5 " " $9}' | sort -nr | head -n1 | cut -d' ' -f2-)"
               fi
               if [ -z "$FOUND_DLL" ] || [ ! -f "$FOUND_DLL" ]; then
                 echo "ERROR: Compiled DLL not found."
