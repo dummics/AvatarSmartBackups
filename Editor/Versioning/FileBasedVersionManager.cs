@@ -294,7 +294,13 @@ namespace AvatarSmartBackup
             if (latest == null)
                 return true;
 
-            int configured = settings?.forceFullCheckpointEveryN ?? 0;
+            int configured = 0;
+            if (settings != null)
+            {
+                settings.EnsureVersioningDefaults();
+                settings.SyncLegacyCheckpointInterval();
+                configured = settings.GetCheckpointInterval();
+            }
             if (configured > 0 && latest.incrementalDepth >= configured - 1)
                 return true;
 

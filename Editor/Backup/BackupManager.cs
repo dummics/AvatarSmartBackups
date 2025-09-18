@@ -56,6 +56,8 @@ namespace AvatarSmartBackup
             if (s.lastMeasuredMBps < 0f) s.lastMeasuredMBps = 0f;
             if (s.lastBackupBytes < 0) s.lastBackupBytes = 0;
             if (s.forceFullCheckpointEveryN < 0) s.forceFullCheckpointEveryN = 0;
+            s.EnsureVersioningDefaults();
+            s.SyncLegacyCheckpointInterval();
             if (s.diskWarningFreeMB <= 0 && s.diskWarningFreePercent <= 0f && s.diskCriticalFreeMB <= 0 && s.diskCriticalFreePercent <= 0f)
             {
                 s.diskWarningFreeMB = 2048;
@@ -99,6 +101,8 @@ namespace AvatarSmartBackup
         {
             try
             {
+                s.EnsureVersioningDefaults();
+                s.SyncLegacyCheckpointInterval();
                 UseProjectSettings = s.useProjectSettings;
                 if (!s.advancedMode) s.debugMode = false;
                 string p = s.useProjectSettings ? ProjectSettingsPath : GlobalSettingsPath;

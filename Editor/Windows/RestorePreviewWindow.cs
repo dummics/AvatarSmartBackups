@@ -26,6 +26,8 @@ namespace AvatarSmartBackup
     bool _hideMeta = true;
     // New foldout-based UI (removes Easy/Advanced dichotomy)
     bool _showNew = true, _showChanged = true, _showSame = true;
+    bool _showNamesOnly = false;
+    bool _highlightMatches = true;
     bool _foldSummary = true, _foldFilters = true, _foldSelection = true, _foldFiles = true;
     string _filter = string.Empty;
     string _lastFilter = string.Empty;
@@ -59,6 +61,14 @@ namespace AvatarSmartBackup
     const string PREF_FOLD_FILTERS = "ASB_Restore_Fold_Filters";
     const string PREF_FOLD_SELECTION = "ASB_Restore_Fold_Selection";
     const string PREF_FOLD_FILES = "ASB_Restore_Fold_Files";
+
+    static readonly Color SummaryColorCheckpoint = new Color(0.23f, 0.46f, 0.80f, 0.18f);
+    static readonly Color SummaryColorIncremental = new Color(0.45f, 0.35f, 0.78f, 0.18f);
+    static readonly Color SummaryColorChanged = new Color(0.77f, 0.55f, 0.16f, 0.22f);
+    static readonly Color SummaryColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
+    const float SummaryBadgeWidth = 150f;
+    static GUIStyle _summaryBadgeLabelStyle;
+    static GUIStyle _summaryTypeLabelStyle;
 
         void OnEnable()
         {
@@ -450,6 +460,23 @@ namespace AvatarSmartBackup
             if (_foldSummary)
             {
                 int total = _diffInfos.Count; int news = _diffInfos.Count(d=>d.state==DiffState.New); int changed = _diffInfos.Count(d=>d.state==DiffState.Changed); int same = _diffInfos.Count(d=>d.state==DiffState.Same);
+                if (_versionInfo != null)
+                {
+                    DrawVersionTypeBadge();
+                    EditorGUILayout.BeginHorizontal();
+                    if (_versionInfo.changedFileCount > 0)
+                        DrawSummaryMiniBadge(SummaryColorChanged, string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.changed", "Changed: {0}"), _versionInfo.changedFileCount));
+                    if (_versionInfo.removedFileCount > 0)
+                        DrawSummaryMiniBadge(SummaryColorRemoved, string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.removed", "Removed: {0}"), _versionInfo.removedFileCount));
+                    long changedBytes = _deltaMetadata?.changedBytes ?? 0;
+                    if (changedBytes > 0)
+                        DrawSummaryMiniBadge(SummaryColorChanged, string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.bytes.changed", "Delta: {0}"), FormatSize(changedBytes)));
+                    long removedBytes = _deltaMetadata?.removedBytes ?? 0;
+                    if (removedBytes > 0)
+                        DrawSummaryMiniBadge(SummaryColorRemoved, string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.bytes.removed", "Removed bytes: {0}"), FormatSize(removedBytes)));
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                }
                 EditorGUILayout.LabelField(string.Format(L.T("rp.stats", "Files: {0}   New: {1}   Changed: {2}   Same: {3}"), total, news, changed, same), EditorStyles.miniLabel);
                 EditorGUILayout.BeginHorizontal();
                 DrawBigStat(L.T("rp.stat.new", "NEW"), news.ToString(), new Color(0.40f,0.80f,0.45f,1f));
@@ -488,8 +515,15 @@ namespace AvatarSmartBackup
                 bool newShowChanged = GUILayout.Toggle(_showChanged, new GUIContent(L.T("rp.filter.changed", "Changed"), L.T("rp.filter.changed.tt", "Show Changed")), "Button", GUILayout.Width(70));
                 bool newShowSame = GUILayout.Toggle(_showSame, new GUIContent(L.T("rp.filter.same", "Same"), L.T("rp.filter.same.tt", "Show Same")), "Button", GUILayout.Width(60));
                 bool newHideMeta = GUILayout.Toggle(_hideMeta, new GUIContent(L.T("rp.filter.hideMeta", "Hide .meta"), L.T("rp.filter.hideMeta.tt", "Hide .meta")), "Button", GUILayout.Width(80));
+                bool newNamesOnly = GUILayout.Toggle(_showNamesOnly, new GUIContent(L.T("rp.filter.namesOnly", "Names"), L.T("rp.filter.namesOnly.tt", "Display only file names")), "Button", GUILayout.Width(80));
+                bool newHighlight = GUILayout.Toggle(_highlightMatches, new GUIContent(L.T("rp.filter.highlight", "Highlight"), L.T("rp.filter.highlight.tt", "Highlight search matches")), "Button", GUILayout.Width(80));
                 if (newShowNew!=_showNew || newShowChanged!=_showChanged || newShowSame!=_showSame || newHideMeta!=_hideMeta)
                 { _showNew=newShowNew; _showChanged=newShowChanged; _showSame=newShowSame; _hideMeta=newHideMeta; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
+                if (newNamesOnly != _showNamesOnly || newHighlight != _highlightMatches)
+                {
+                    _showNamesOnly = newNamesOnly;
+                    _highlightMatches = newHighlight;
+                }
                 if (GUILayout.Button(L.T("rp.reset", "Reset"), GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.LabelField(L.T("rp.search", "Search:"), GUILayout.Width(48));
@@ -585,19 +619,24 @@ namespace AvatarSmartBackup
                                 : di.state == DiffState.Same ? new Color(0.8f,0.8f,0.8f,0.8f)
                                 : GUI.color))
                             {
-                                string labelText = di.rel;
-                                if (!string.IsNullOrEmpty(_filter))
+                                string labelSource = _showNamesOnly ? Path.GetFileName(di.rel) : di.rel;
+                                if (string.IsNullOrEmpty(labelSource))
+                                    labelSource = di.rel;
+
+                                string labelText = labelSource;
+                                if (_highlightMatches && !string.IsNullOrEmpty(_filter))
                                 {
-                                    int pos = di.rel.IndexOf(_filter, StringComparison.OrdinalIgnoreCase);
+                                    int pos = labelSource.IndexOf(_filter, StringComparison.OrdinalIgnoreCase);
                                     if (pos >= 0)
                                     {
-                                        var before = di.rel.Substring(0,pos);
-                                        var match = di.rel.Substring(pos,_filter.Length);
-                                        var after = di.rel.Substring(pos+_filter.Length);
+                                        var before = labelSource.Substring(0, pos);
+                                        var match = labelSource.Substring(pos, _filter.Length);
+                                        var after = labelSource.Substring(pos + _filter.Length);
                                         labelText = before + "<b><color=#FFFFFF>" + match + "</color></b>" + after;
                                     }
                                 }
-                                GUIStyle rich = new GUIStyle(EditorStyles.label){richText=true};
+
+                                var rich = new GUIStyle(EditorStyles.label) { richText = _highlightMatches };
                                 EditorGUILayout.LabelField(labelText, rich, GUILayout.ExpandWidth(true));
                             }
                             EditorGUILayout.LabelField(FormatSize(di.size), GUILayout.Width(70));
@@ -727,6 +766,37 @@ namespace AvatarSmartBackup
             GUILayout.Label(value, valStyle);
             GUILayout.EndVertical();
             GUI.color = prev;
+        }
+
+        void DrawSummaryMiniBadge(Color tint, string text)
+        {
+            var rect = GUILayoutUtility.GetRect(SummaryBadgeWidth, 20f, GUILayout.MaxWidth(SummaryBadgeWidth));
+            EditorGUI.DrawRect(rect, tint);
+            _summaryBadgeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = Color.white }
+            };
+            GUI.Label(rect, text, _summaryBadgeLabelStyle);
+        }
+
+        void DrawVersionTypeBadge()
+        {
+            if (_versionInfo == null)
+                return;
+
+            var rect = EditorGUILayout.GetControlRect(false, 22f);
+            var tint = _versionInfo.isCheckpoint ? SummaryColorCheckpoint : SummaryColorIncremental;
+            EditorGUI.DrawRect(rect, tint);
+            _summaryTypeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Color.white }
+            };
+            string label = _versionInfo.isCheckpoint
+                ? AvatarSmartBackup.Localization.L.T("vc.summary.checkpoint", "Full checkpoint (complete snapshot).")
+                : string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.incremental", "Incremental version (based on checkpoint #{0})."), _versionInfo.checkpointId > 0 ? _versionInfo.checkpointId.ToString() : "--");
+            GUI.Label(new Rect(rect.x + 8f, rect.y + 3f, rect.width - 16f, rect.height - 6f), label, _summaryTypeLabelStyle);
         }
 
         void ApplySelectStates(Func<FileDiffInfo,bool> predicate, bool val)
