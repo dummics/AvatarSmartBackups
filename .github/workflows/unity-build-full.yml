@@ -74,13 +74,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Login a GHCR per evitare limiti ed accedere a immagini private/pubbliche
+      # Login a GHCR per accedere a immagini private/pubbliche
       - name: Login GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.GHCR_PAT }}
 
       # === CACHE PERSISTENTE PER DOTNET E NUGET DENTRO IL CONTAINER ===
       - name: Prepare cache dirs (host)
@@ -106,61 +106,68 @@ jobs:
           key: dotnet-sdk-${{ runner.os }}-8.0
 
       - name: Build Core DLL in UnityCI container (fast, no editor launch)
-        uses: addnab/docker-run-action@v3
-        with:
-          image: ${{ env.UNITY_IMAGE }}
-          options: >-
-            -v ${{ github.workspace }}:/workspace
-            -v ${{ steps.cachedirs.outputs.nuget_dir }}:/root/.nuget/packages
-            -v ${{ steps.cachedirs.outputs.dotnet_dir }}:/root/.dotnet
-            -w /workspace
-          run: |
-            set -e
-            export DOTNET_CLI_TELEMETRY_OPTOUT=1
-            export DOTNET_NOLOGO=1
+        run: |
+          set -e
+          
+          # Login a GHCR e pull dell'immagine
+          echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker pull ${{ env.UNITY_IMAGE }}
+          
+          # Run del container con mount delle cache
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            -v ${{ steps.cachedirs.outputs.nuget_dir }}:/root/.nuget/packages \
+            -v ${{ steps.cachedirs.outputs.dotnet_dir }}:/root/.dotnet \
+            -w /workspace \
+            ${{ env.UNITY_IMAGE }} \
+            bash -c '
+              set -e
+              export DOTNET_CLI_TELEMETRY_OPTOUT=1
+              export DOTNET_NOLOGO=1
 
-            # dotnet SDK (usa cache montata in /root/.dotnet)
-            if ! command -v dotnet >/dev/null 2>&1; then
-              curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-              chmod +x dotnet-install.sh
-              ./dotnet-install.sh --channel 8.0
-              export PATH=/root/.dotnet:$PATH
-            else
-              export PATH=/root/.dotnet:$PATH
-            fi
-            dotnet --info
+              # dotnet SDK (usa cache montata in /root/.dotnet)
+              if ! command -v dotnet >/dev/null 2>&1; then
+                curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+                chmod +x dotnet-install.sh
+                ./dotnet-install.sh --channel 8.0
+                export PATH=/root/.dotnet:$PATH
+              else
+                export PATH=/root/.dotnet:$PATH
+              fi
+              dotnet --info
 
-            # >>> aggiorna se il .csproj cambia percorso <<<
-            PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
+              # >>> aggiorna se il .csproj cambia percorso <<<
+              PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
 
-            UNITY_MANAGED="/opt/unity/Editor/Data/Managed"
-            REF_PATH="$UNITY_MANAGED:$UNITY_MANAGED/UnityEngine:$UNITY_MANAGED/UnityEditor"
-            
-            dotnet restore "$PROJ"
-            dotnet build "$PROJ" -c Release -p:ReferencePath="$REF_PATH" -p:WarningsAsErrors=false
+              UNITY_MANAGED="/opt/unity/Editor/Data/Managed"
+              REF_PATH="$UNITY_MANAGED:$UNITY_MANAGED/UnityEngine:$UNITY_MANAGED/UnityEditor"
+              
+              dotnet restore "$PROJ"
+              dotnet build "$PROJ" -c Release -p:ReferencePath="$REF_PATH" -p:WarningsAsErrors=false
 
-            DLL=src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
-            test -f "$DLL" || (echo "DLL non trovata ($DLL)"; exit 1)
+              DLL=src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
+              test -f "$DLL" || (echo "DLL non trovata ($DLL)"; exit 1)
 
-            # Prepara Editor/ con asmdef che referenzia la DLL
-            rm -rf Editor || true
-            mkdir -p Editor
-            cat > Editor/AvatarSmartBackups.Editor.asmdef <<'JSON'
-            {
-              "name": "AvatarSmartBackups.Editor",
-              "references": [],
-              "includePlatforms": ["Editor"],
-              "excludePlatforms": [],
-              "allowUnsafeCode": false,
-              "overrideReferences": false,
-              "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
-              "autoReferenced": true,
-              "defineConstraints": [],
-              "versionDefines": [],
-              "noEngineReferences": false
-            }
-            JSON
-            cp "$DLL" Editor/
+              # Prepara Editor/ con asmdef che referenzia la DLL
+              rm -rf Editor || true
+              mkdir -p Editor
+              cat > Editor/AvatarSmartBackups.Editor.asmdef <<'\''JSON'\''
+              {
+                "name": "AvatarSmartBackups.Editor",
+                "references": [],
+                "includePlatforms": ["Editor"],
+                "excludePlatforms": [],
+                "allowUnsafeCode": false,
+                "overrideReferences": false,
+                "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
+                "autoReferenced": true,
+                "defineConstraints": [],
+                "versionDefines": [],
+                "noEngineReferences": false
+              }
+              JSON
+              cp "$DLL" Editor/
+            '
 
       - id: pkgzip
         name: Create VPM ZIP (package.json + Editor/*)
