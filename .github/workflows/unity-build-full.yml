@@ -205,21 +205,6 @@ jobs:
           # Prepare Editor and copy DLL
           rm -rf Editor || true
           mkdir -p Editor
-          cat > Editor/AvatarSmartBackups.Editor.asmdef <<EOF
-          {
-            "name": "AvatarSmartBackups.Editor",
-            "references": [],
-            "includePlatforms": ["Editor"],
-            "excludePlatforms": [],
-            "allowUnsafeCode": false,
-            "overrideReferences": false,
-            "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
-            "autoReferenced": true,
-            "defineConstraints": [],
-            "versionDefines": [],
-            "noEngineReferences": false
-          }
-          EOF
           cp -f "$DLL" "Editor/AvatarSmartBackups.Core.dll"
           echo "Editor folder content after copy (inside container):"
           ls -la Editor
