@@ -959,7 +959,7 @@ namespace AvatarSmartBackup
                 {
                     foreach (var f in Directory.GetFiles(Path.Combine(FileUtilEx.ProjectRoot, "Assets"), "*", SearchOption.AllDirectories))
                     {
-                        var rel = FileUtilEx.MakeRelToProject(f).Replace("\", "/");
+                        var rel = FileUtilEx.MakeRelToProject(f).Replace("\\", "/");
                         var dst = Path.Combine(safedir, rel);
                         Directory.CreateDirectory(Path.GetDirectoryName(dst));
                         File.Copy(f, dst, true);
