@@ -1,12 +1,12 @@
-name: build-release-full
+name: build-release
 
 on:
   workflow_dispatch:
     inputs:
-      unityVersion:
-        description: "Unity version fallback (es. 2022.3.22f1)"
+      unityImage:
+        description: "UnityCI image tag (override, opzionale)"
         required: false
-        default: "2022.3.22f1"
+        default: "unityci/editor:ubuntu-2022.3.60f1-base-3.1"
   push:
     tags:
       - "*"
@@ -19,16 +19,17 @@ permissions:
   contents: write
 
 env:
+  # Immagine UnityCI validata da te; puoi overrideare con l'input workflow_dispatch
+  UNITY_IMAGE: ${{ github.event.inputs.unityImage || 'unityci/editor:ubuntu-2022.3.60f1-base-3.1' }}
   ARTIFACT_NAME: release-zip
 
 jobs:
   prepare:
-    name: Prepare (read version & validate)
+    name: Prepare (read version & pkg name)
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.meta.outputs.version }}
       pkgname: ${{ steps.meta.outputs.name }}
-      unity:   ${{ steps.meta.outputs.unity }}
     steps:
       - uses: actions/checkout@v4
 
@@ -39,24 +40,15 @@ jobs:
           fi
 
       - id: meta
-        name: Read package.json metadata
+        name: Read package.json
+        shell: bash
         run: |
           set -e
           VER=$(jq -r '.version' package.json)
           NAME=$(jq -r '.name' package.json)
-          UNITY=$(jq -r '.unity' package.json)
-
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "name=$NAME"   >> $GITHUB_OUTPUT
-
-          if [ "$UNITY" = "null" ] || [ -z "$UNITY" ]; then
-            # fallback manuale se manca
-            UNITY="2022.3.22f1"
-          fi
-          echo "unity=$UNITY" >> $GITHUB_OUTPUT
-
-          echo "Package: $NAME  Version: $VER  Unity: $UNITY"
-
+          echo "Package: $NAME  Version: $VER"
 
       - name: Validate tag vs package.json (on tag push)
         if: startsWith(github.ref, 'refs/tags/')
@@ -81,65 +73,72 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Login Docker Hub (avoid rate-limit)
+      # Evita rate-limit di Docker Hub
+      - name: Login Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Pick UnityCI image (try 3.1 then 3.0)
-        id: pickimg
-        env:
-          U: ${{ needs.prepare.outputs.unity }}
+      # === CACHE PERSISTENTE PER DOTNET E NUGET DENTRO IL CONTAINER ===
+      - name: Prepare cache dirs (host)
+        id: cachedirs
         run: |
-          set -e
-          IMG1="unityci/editor:${U}-base-3.1"
-          IMG2="unityci/editor:${U}-base-3.0"
-          if docker manifest inspect "$IMG1" >/dev/null 2>&1; then
-            echo "image=$IMG1" >> $GITHUB_OUTPUT
-          elif docker manifest inspect "$IMG2" >/dev/null 2>&1; then
-            echo "image=$IMG2" >> $GITHUB_OUTPUT
-          else
-            echo "No unityci/editor image for $U (tried $IMG1, $IMG2)"; exit 1
-          fi
+          echo "nuget_dir=${RUNNER_TEMP}/nuget-cache" >> $GITHUB_OUTPUT
+          echo "dotnet_dir=${RUNNER_TEMP}/dotnet-cache" >> $GITHUB_OUTPUT
+          mkdir -p "${RUNNER_TEMP}/nuget-cache"
+          mkdir -p "${RUNNER_TEMP}/dotnet-cache"
 
-      - name: Install zip
-        run: sudo apt-get update && sudo apt-get install -y zip
-
-      - name: Cache NuGet
+      - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
-          path: ~/.nuget/packages
+          path: ${{ steps.cachedirs.outputs.nuget_dir }}
           key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/*.csproj') }}
           restore-keys: |
             nuget-${{ runner.os }}-
 
+      - name: Cache .NET SDK (dotnet-install)
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.cachedirs.outputs.dotnet_dir }}
+          key: dotnet-sdk-${{ runner.os }}-8.0
+
       - name: Build Core DLL in UnityCI container (fast, no editor launch)
         uses: addnab/docker-run-action@v3
         with:
-          image: ${{ steps.pickimg.outputs.image }}
-          options: -v ${{ github.workspace }}:/workspace -w /workspace
+          image: ${{ env.UNITY_IMAGE }}
+          options: >-
+            -v ${{ github.workspace }}:/workspace
+            -v ${{ steps.cachedirs.outputs.nuget_dir }}:/root/.nuget/packages
+            -v ${{ steps.cachedirs.outputs.dotnet_dir }}:/root/.dotnet
+            -w /workspace
           run: |
             set -e
-            export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
-            echo "Using UNITY_MANAGED=$UNITY_MANAGED"
+            export DOTNET_CLI_TELEMETRY_OPTOUT=1
+            export DOTNET_NOLOGO=1
 
-            # dotnet SDK (leggero)
-            curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-            chmod +x dotnet-install.sh
-            ./dotnet-install.sh --channel 8.0
-            export PATH=$HOME/.dotnet:$PATH
+            # dotnet SDK (usa cache montata in /root/.dotnet)
+            if ! command -v dotnet >/dev/null 2>&1; then
+              curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+              chmod +x dotnet-install.sh
+              ./dotnet-install.sh --channel 8.0
+              export PATH=/root/.dotnet:$PATH
+            else
+              export PATH=/root/.dotnet:$PATH
+            fi
             dotnet --info
 
-            # >>> modifica se il .csproj cambia posizione <<<
+            # >>> aggiorna se il .csproj cambia percorso <<<
             PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
+
+            UNITY_MANAGED="/opt/unity/Editor/Data/Managed"
             REF_PATH="$UNITY_MANAGED;$UNITY_MANAGED/UnityEngine;$UNITY_MANAGED/UnityEditor"
 
             dotnet restore "$PROJ"
             dotnet build "$PROJ" -c Release -p:ReferencePath="$REF_PATH" -p:WarningsAsErrors=false
 
             DLL=src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
-            test -f "$DLL" || (echo "DLL non trovata ($DLL)"; ls -la src/AvatarSmartBackups.Core/bin/Release || true; exit 1)
+            test -f "$DLL" || (echo "DLL non trovata ($DLL)"; exit 1)
 
             # Prepara Editor/ con asmdef che referenzia la DLL
             rm -rf Editor || true
@@ -169,9 +168,9 @@ jobs:
           VER="${{ needs.prepare.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
           [ -f package.json ] || (echo "package.json missing" && exit 1)
-          zip -r "$ZIP" package.json Editor
+          mkdir -p artifact
+          zip -r "artifact/$ZIP" package.json Editor
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
-          mkdir -p artifact && mv "$ZIP" artifact/
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
@@ -197,7 +196,6 @@ jobs:
         id: softprops
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
-        continue-on-error: true
         with:
           token: ${{ secrets.DIST_REPO_TOKEN }}
           repository: dummics/unity-smart-backup
@@ -220,13 +218,11 @@ jobs:
           echo "softprops failed, attempting gh release fallback..."
           for attempt in 1 2 3; do
             if gh release view "$VER" --repo "$REPO" >/dev/null 2>&1; then
-              echo "Release exists, uploading assets with clobber (attempt $attempt)"
               gh release upload "$VER" "${ASSETS[@]}" --repo "$REPO" --clobber && break || true
             else
-              echo "Creating release $VER (attempt $attempt)"
               gh release create "$VER" "${ASSETS[@]}" --repo "$REPO" -t "$VER" -n "$VER" && break || true
             fi
-            echo "Retrying in $((attempt*5))s..."; sleep $((attempt*5))
+            sleep $((attempt*5))
           done
 
       - name: Checkout listing repo for update (only on tag)
@@ -249,6 +245,7 @@ jobs:
 
           [ -f source.json ] || echo '{"packages":[]}' > source.json
 
+          # Sanitize + update
           SAN="source.sanitized.json"
           if ! jq '.' source.json >/dev/null 2>&1; then
             perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
@@ -287,5 +284,4 @@ jobs:
         if: always()
         run: |
           echo "Build finished for ${{ needs.prepare.outputs.pkgname }}@${{ needs.prepare.outputs.version }}" > $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "- ZIP artifact: $(ls artifact | head -n1)" >> $GITHUB_STEP_SUMMARY
