@@ -195,7 +195,7 @@ namespace AvatarSmartBackup.Localization
                 {"window.main.autobackup.help", "Automatic safety copies run in the background. Use 'Backup Now' to force one (throttled)."},
                 {"window.main.header", "Avatar Smart Backup"},
                 {"window.main.title", "Avatar Smart Backup"},
-                {"window.version.history.help", "Versions are of two types: full checkpoints and incremental. Incremental versions store only changes since the previous checkpoint."}
+                {"window.version.history.help", "Versions are of two types: full checkpoints and incremental. Incremental versions store only changes since the previous checkpoint."},
             {"ui.advanced.settings", "Advanced Settings"},
             {"ui.versioning.policy.title", "Versioning policy"},
             {"ui.versioning.policy.option.balanced", "Automatic"},
