@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <OutputType>Library</OutputType>
+    <AssemblyName>AvatarSmartBackups.Core</AssemblyName>
+    <RootNamespace>AvatarSmartBackup</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Includi tutti i file .cs dalla codebase effettiva -->
+    <Compile Include="..\..\Editor\**\*.cs" Exclude="..\..\Editor\**\*Test*.cs" />
+  </ItemGroup>
+
+  <!-- Consente il build di net48 su ambienti non-Windows (GitHub Actions Ubuntu) -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>
