@@ -144,7 +144,6 @@ jobs:
               export DOTNET_CLI_TELEMETRY_OPTOUT=1
               export DOTNET_NOLOGO=1
 
-              # Verifica struttura Unity nell immagine (info diagnostiche)
               echo "=== Unity Installation Check ==="
               for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
                 echo "Trying: $d"
@@ -152,7 +151,6 @@ jobs:
               done
               echo "================================"
 
-              # dotnet SDK (usa cache montata in /root/.dotnet)
               if ! command -v dotnet >/dev/null 2>&1; then
                 curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
                 chmod +x dotnet-install.sh
@@ -171,66 +169,53 @@ jobs:
               for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
                 if [ -d "$d" ]; then UNITY_MANAGED="$d"; break; fi
               done
-
               if [ -z "$UNITY_MANAGED" ]; then
-                echo "UNITY_MANAGED not found in known paths, scanning image..."
                 CAND=$(find / -maxdepth 5 -type f -name "UnityEditor.dll" 2>/dev/null | head -n 1 || true)
-                if [ -n "$CAND" ]; then
-                  UNITY_MANAGED="$(dirname "$CAND")"
-                fi
+                if [ -n "$CAND" ]; then UNITY_MANAGED="$(dirname "$CAND")"; fi
               fi
-
-              if [ -z "$UNITY_MANAGED" ] || [ ! -d "$UNITY_MANAGED" ]; then
-                echo "ERROR: Could not locate Unity Managed folder in container."
-                echo "Hint: ensure your image ${UNITY_IMAGE} actually contains the DLLs or bump the tag to avoid stale cache."
-                echo "Debug: Files named UnityEditor.dll in image:"
-                find / -maxdepth 7 -type f -name "UnityEditor.dll" 2>/dev/null || true
-                exit 1
-              fi
+              [ -n "$UNITY_MANAGED" ] && [ -d "$UNITY_MANAGED" ] || { echo "ERROR: Managed folder not found"; exit 1; }
 
               export UNITY_MANAGED
               echo "UNITY_MANAGED set to: $UNITY_MANAGED"
 
               # ---- Verifica DLL necessarie ----
-              echo "Verifying Unity DLLs exist..."
-              if [ ! -f "$UNITY_MANAGED/UnityEditor.dll" ]; then
-                echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"
-                echo "Debug:"
-                find "$UNITY_MANAGED" -maxdepth 3 -name "UnityEditor.dll" || true
-                exit 1
-              fi
-
-              # UnityEngine può stare a radice o sotto /UnityEngine/UnityEngine.dll
-              UE_DLL=""
+              [ -f "$UNITY_MANAGED/UnityEditor.dll" ] || { echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"; exit 1; }
               if [ -f "$UNITY_MANAGED/UnityEngine.dll" ]; then
-                UE_DLL="$UNITY_MANAGED/UnityEngine.dll"
+                echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine.dll"
               elif [ -f "$UNITY_MANAGED/UnityEngine/UnityEngine.dll" ]; then
-                UE_DLL="$UNITY_MANAGED/UnityEngine/UnityEngine.dll"
-              fi
-
-              if [ -z "$UE_DLL" ]; then
-                echo "ERROR: UnityEngine.dll not found."
-                echo "Debug:"
-                find "$UNITY_MANAGED" -maxdepth 3 -name "UnityEngine.dll" || true
-                exit 1
+                echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine/UnityEngine.dll"
               else
-                echo "Found UnityEngine at: $UE_DLL"
+                echo "ERROR: UnityEngine.dll not found under $UNITY_MANAGED"
+                exit 1
               fi
-              # ---- Fine verifica ----
 
+              # ---- Build ----
               dotnet restore "$PROJ"
               echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
               dotnet build "$PROJ" -c Release \
                 -p:UNITY_MANAGED="$UNITY_MANAGED" \
                 -p:WarningsAsErrors=false
 
-              DLL=src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
-              test -f "$DLL" || (echo "DLL non trovata ($DLL)"; exit 1)
+              # ---- Individua la DLL prodotta in modo robusto ----
+              OUTDIR="$(dirname "$PROJ")/bin/Release"
+              echo "Search built DLL under: $OUTDIR"
+              FOUND_DLL="$(find "$OUTDIR" -type f -name "AvatarSmartBackups.Core.dll" | head -n1 || true)"
+              if [ -z "$FOUND_DLL" ]; then
+                echo "WARNING: AvatarSmartBackups.Core.dll not found by name; listing DLLs for debug:"
+                find "$OUTDIR" -type f -name "*.dll" -maxdepth 3 -ls || true
+                # Prova fallback: prendi la dll più grande che NON sia reference assemblies
+                FOUND_DLL="$(find "$OUTDIR" -type f -name "*.dll" -printf "%s %p\n" | sort -nr | awk "NR==1{print \$2}")"
+              fi
+              if [ -z "$FOUND_DLL" ] || [ ! -f "$FOUND_DLL" ]; then
+                echo "ERROR: Compiled DLL not found."
+                exit 1
+              fi
+              echo "Using built DLL: $FOUND_DLL"
 
-              # Prepara Editor/ con asmdef che referenzia la DLL
+              # ---- Prepara Editor/ e copia con nome fisso ----
               rm -rf Editor || true
               mkdir -p Editor
-              cat > Editor/AvatarSmartBackups.Editor.asmdef <<'\''JSON'\''
+              cat > Editor/AvatarSmartBackups.Editor.asmdef <<'"'"'JSON'"'"'
               {
                 "name": "AvatarSmartBackups.Editor",
                 "references": [],
@@ -245,27 +230,32 @@ jobs:
                 "noEngineReferences": false
               }
               JSON
-              cp "$DLL" Editor/
+
+              # Copia e rinomina se necessario
+              install -m 0644 "$FOUND_DLL" "Editor/AvatarSmartBackups.Core.dll"
+
+              echo "Editor folder content after copy:"
+              ls -la Editor
             '
 
 
-      - id: pkgzip
-        name: Create VPM ZIP (package.json + Editor/*)
-        run: |
-          set -e
-          NAME="${{ needs.prepare.outputs.pkgname }}"
-          VER="${{ needs.prepare.outputs.version }}"
-          ZIP="${NAME}-${VER}.zip"
-          [ -f package.json ] || (echo "package.json missing" && exit 1)
-          mkdir -p artifact
-          zip -r "artifact/$ZIP" package.json Editor
-          echo "zip=$ZIP" >> $GITHUB_OUTPUT
+            - id: pkgzip
+              name: Create VPM ZIP (package.json + Editor/*)
+              run: |
+                set -e
+                NAME="${{ needs.prepare.outputs.pkgname }}"
+                VER="${{ needs.prepare.outputs.version }}"
+                ZIP="${NAME}-${VER}.zip"
+                [ -f package.json ] || (echo "package.json missing" && exit 1)
+                mkdir -p artifact
+                zip -r "artifact/$ZIP" package.json Editor
+                echo "zip=$ZIP" >> $GITHUB_OUTPUT
 
-      - name: Upload ZIP artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: artifact/*.zip
+            - name: Upload ZIP artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: ${{ env.ARTIFACT_NAME }}
+                path: artifact/*.zip
 
   publish:
     name: Publish Release & Update listing
