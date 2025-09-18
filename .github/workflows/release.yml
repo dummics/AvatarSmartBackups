@@ -131,15 +131,41 @@ jobs:
         run: |
           ls -la artifact
 
-      - name: Publish release to PUBLIC repo (dummics/unity-smart-backup) if tag
+      - name: Publish release to PUBLIC repo (softprops) [on tag]
+        id: publish_release_softprops
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
+        continue-on-error: true
         with:
           token: ${{ secrets.DIST_REPO_TOKEN }}
           repository: dummics/unity-smart-backup
           tag_name: ${{ needs.prepare.outputs.version }}
           name: ${{ needs.prepare.outputs.version }}
           files: artifact/*
+          overwrite_files: true
+
+      - name: Fallback publish via gh (retry) [on tag]
+        if: startsWith(github.ref, 'refs/tags/') && steps.publish_release_softprops.outcome != 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
+        run: |
+          set -e
+          VER="${{ needs.prepare.outputs.version }}"
+          REPO="dummics/unity-smart-backup"
+          shopt -s nullglob
+          ASSETS=(artifact/*)
+          echo "softprops failed, attempting gh release fallback..."
+          for attempt in 1 2 3; do
+            if gh release view "$VER" --repo "$REPO" >/dev/null 2>&1; then
+              echo "Release exists, uploading assets with clobber (attempt $attempt)"
+              gh release upload "$VER" "${ASSETS[@]}" --repo "$REPO" --clobber && break || true
+            else
+              echo "Creating release $VER (attempt $attempt)"
+              gh release create "$VER" "${ASSETS[@]}" --repo "$REPO" -t "$VER" -n "$VER" && break || true
+            fi
+            echo "Retrying in $((attempt*5))s..."; sleep $((attempt*5))
+          done
 
       - name: Checkout listing repo for update (only on tag)
         if: startsWith(github.ref, 'refs/tags/')
