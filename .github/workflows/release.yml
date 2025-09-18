@@ -200,6 +200,7 @@ jobs:
           fi
 
           # Aggiorna il listing sul file sanificato poi sovrascrive source.json
+          echo "Sanificazione completata, applicando jq su $SAN"
           jq --arg name "$NAME" --arg url "$URL" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
