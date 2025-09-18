@@ -190,11 +190,16 @@ jobs:
 
           [ -f source.json ] || echo '{"packages":[]}' > source.json
 
-          # Aggiorna il listing:
-          # - garantisce che packages sia un array
-          # - rimuove eventuali entry con name vuoto
-          # - aggiunge l'URL alla lista releases del package con nome $NAME
-          # - garantisce uniqueness (senza duplicati)
+          # Se il JSON non è valido (es. virgole finali), sanificalo in un file temporaneo
+          SAN="source.sanitized.json"
+          if ! jq '.' source.json >/dev/null 2>&1; then
+            # Rimuove virgole prima di } o ]
+            sed -E ':a;N;$!ba;s/,([[:space:]]*[}\]])/\1/g' source.json > "$SAN" || cp source.json "$SAN"
+          else
+            cp source.json "$SAN"
+          fi
+
+          # Aggiorna il listing sul file sanificato poi sovrascrive source.json
           jq --arg name "$NAME" --arg url "$URL" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
@@ -208,7 +213,10 @@ jobs:
               else
                 (.packages += [{name: $name, releases: [$url]}])
               end
-          ' source.json > source.tmp && mv source.tmp source.json
+          ' "$SAN" > source.tmp && mv source.tmp source.json
+
+          # Verifica JSON finale valido
+          jq '.' source.json >/dev/null
 
           if git diff --quiet; then
             echo "Nessuna modifica a source.json, salto commit/push"
