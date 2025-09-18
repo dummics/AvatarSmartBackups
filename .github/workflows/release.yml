@@ -48,6 +48,21 @@ jobs:
         shell: bash
         run: jq '.' listing/source.json > /dev/null
 
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build Core DLL
+        run: dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
+
+      - name: Integrate DLL in package
+        shell: bash
+        run: |
+          mkdir -p Plugins
+          cp src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll Plugins/
+          find Editor -name "*.cs" -type f -delete
+
       - id: buildzip
         name: Crea ZIP VPM
         shell: bash
@@ -59,7 +74,7 @@ jobs:
           )
           VER="${{ steps.pkg.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
-          zip -r "$ZIP" package.json Editor
+          zip -r "$ZIP" package.json Editor Plugins
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
           echo "name=$NAME" >> $GITHUB_OUTPUT
 

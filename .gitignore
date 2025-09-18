@@ -1,3 +1,21 @@
 *.meta
 /tests/**/bin/
 /tests/**/obj/
+
+# Build outputs
+bin/
+obj/
+*.dll
+*.exe
+*.pdb
+
+# Compiled DLL in Plugins (built in CI)
+Plugins/
+
+# Unity temp files
+Library/
+Temp/
+*.log
+
+# VS Code settings (optional, remove if you want to commit)
+.vscode/
