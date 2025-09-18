@@ -17,6 +17,7 @@ namespace AvatarSmartBackup
     {
     Vector2 _scroll;
     int _versionId;
+    int _resolvedVersionId;
     // Raw file list from version
     List<string> _files = new List<string>();
     List<FileDiffInfo> _diffInfos = new List<FileDiffInfo>();
@@ -139,6 +140,7 @@ namespace AvatarSmartBackup
         {
             var w = GetWindow<RestorePreviewWindow>(true, "Restore Preview", true);
             w._versionId = versionId;
+            w._resolvedVersionId = versionId;
             w.minSize = new Vector2(760, 520);
             w.LoadFiles();
             w.Show();
@@ -164,8 +166,8 @@ namespace AvatarSmartBackup
             if (_versionId > 0)
             {
                 using var vmInfo = new FileBasedVersionManager();
-                _versionInfo = vmInfo.GetVersion(_versionId);
-                if (_versionInfo == null)
+                var requestedInfo = vmInfo.GetVersion(_versionId);
+                if (requestedInfo == null)
                 {
                     EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.notfound", "Version #{0} not found."), _versionId), "OK");
                     return;
@@ -173,8 +175,16 @@ namespace AvatarSmartBackup
                 try
                 {
                     srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
+                    var prep = VersionRestoreService.LastResult;
+                    _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
+                    _versionInfo = _resolvedVersionId == _versionId ? requestedInfo : vmInfo.GetVersion(_resolvedVersionId);
+                    if (_versionInfo == null)
+                    {
+                        EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.notfound", "Version #{0} not found."), _resolvedVersionId), "OK");
+                        return;
+                    }
                     _deltaMetadata = VersionRestoreService.LoadDeltaMetadata(_versionInfo) ?? new VersionDeltaMetadata();
-                    _snapshotWarning = VersionRestoreService.LastWarning;
+                    _snapshotWarning = prep?.Message ?? VersionRestoreService.LastWarning;
                 }
                 catch (Exception ex)
                 {
@@ -186,6 +196,7 @@ namespace AvatarSmartBackup
             {
                 srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
                 _snapshotWarning = null;
+                _resolvedVersionId = _versionId;
             }
             _currentVersionRoot = srcRoot;
             _resolvedSnapshotRoot = srcRoot;
@@ -456,11 +467,23 @@ namespace AvatarSmartBackup
             // Assicurati che eventuali cambi colore precedenti non contaminino tutto
             GUI.color = Color.white;
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
-            EditorGUILayout.LabelField(L.T("rp.title", "Restore Preview") + " " + ( _versionId>0? ("v"+_versionId.ToString("D3")) : L.T("rp.current", "Current")), EditorStyles.boldLabel);
+            string versionLabel;
+            if (_versionId > 0)
+            {
+                versionLabel = _resolvedVersionId > 0 && _resolvedVersionId != _versionId
+                    ? $"v{_versionId:D3} → v{_resolvedVersionId:D3}"
+                    : $"v{_versionId:D3}";
+            }
+            else
+            {
+                versionLabel = L.T("rp.current", "Current");
+            }
+            EditorGUILayout.LabelField(L.T("rp.title", "Restore Preview") + " " + versionLabel, EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
             if (GUILayout.Button(new GUIContent(L.T("rp.open.folder", "Open Folder"), L.T("rp.open.folder.tt", "Open version folder")), GUILayout.Width(100)))
             {
-                string root = _versionId>0? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{_versionId:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
+                int rootVersion = _resolvedVersionId > 0 ? _resolvedVersionId : _versionId;
+                string root = rootVersion>0? Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{rootVersion:D3}") : Path.Combine(FileUtilEx.BackupRoot, "Current");
                 EditorUtility.RevealInFinder(root);
             }
             EditorGUILayout.EndHorizontal();
@@ -902,9 +925,16 @@ namespace AvatarSmartBackup
                     if (string.IsNullOrEmpty(srcRoot) || !Directory.Exists(srcRoot))
                     {
                         srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
-                        _resolvedSnapshotRoot = srcRoot;
-                        _currentVersionRoot = srcRoot;
-                        _snapshotWarning = VersionRestoreService.LastWarning;
+                    }
+                    var prep = VersionRestoreService.LastResult;
+                    _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
+                    _snapshotWarning = prep?.Message ?? VersionRestoreService.LastWarning;
+                    _resolvedSnapshotRoot = srcRoot;
+                    _currentVersionRoot = srcRoot;
+                    if (_versionInfo == null || _versionInfo.id != _resolvedVersionId)
+                    {
+                        using var vmInfo = new FileBasedVersionManager();
+                        _versionInfo = vmInfo.GetVersion(_resolvedVersionId);
                     }
                 }
                 catch (Exception ex)
@@ -1137,8 +1167,13 @@ Destination: {1}"), restored, targetRoot), "OK");
                 try
                 {
                     _resolvedSnapshotRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: true);
+                    var prep = VersionRestoreService.LastResult;
+                    _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
+                    _snapshotWarning = prep?.Message ?? VersionRestoreService.LastWarning;
                     _currentVersionRoot = _resolvedSnapshotRoot;
-                    _snapshotWarning = VersionRestoreService.LastWarning;
+                    using var vmInfo = new FileBasedVersionManager();
+                    _versionInfo = vmInfo.GetVersion(_resolvedVersionId);
+                    _deltaMetadata = VersionRestoreService.LoadDeltaMetadata(_versionInfo) ?? new VersionDeltaMetadata();
                 }
                 catch (Exception ex)
                 {
