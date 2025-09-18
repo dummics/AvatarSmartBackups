@@ -1,10 +1,19 @@
-name: build-release
+name: build-release-full
 
 on:
   workflow_dispatch:
- # push:
-  #  tags:
-   #   - "*"
+    inputs:
+      unityVersion:
+        description: "Unity version fallback (es. 2022.3.22f1)"
+        required: false
+        default: "2022.3.22f1"
+  push:
+    tags:
+      - "*"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -17,122 +26,160 @@ jobs:
     name: Prepare (read version & validate)
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.readpkg.outputs.version }}
-      pkgname: ${{ steps.readpkg.outputs.name }}
+      version: ${{ steps.meta.outputs.version }}
+      pkgname: ${{ steps.meta.outputs.name }}
+      unity:   ${{ steps.meta.outputs.unity }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - id: readpkg
-        name: Read package.json (version & name)
+      - name: Ensure jq
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+      - id: meta
+        name: Read package.json + Unity version
         shell: bash
         run: |
           set -e
-          ver=$(jq -r '.version' package.json)
-          name=$(jq -r '.name' package.json)
-          echo "version=$ver" >> $GITHUB_OUTPUT
-          echo "name=$name" >> $GITHUB_OUTPUT
+          VER=$(jq -r '.version' package.json)
+          NAME=$(jq -r '.name' package.json)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
 
-      - name: Validate tag vs package.json (only on tag push)
+          # Unity version dal progetto se presente
+          UVER=""
+          if [ -f ProjectSettings/ProjectVersion.txt ]; then
+            UVER=$(grep -oP '(?<=m_EditorVersion: )\S+' ProjectSettings/ProjectVersion.txt || true)
+          fi
+          # fallback all'input
+          if [ -z "$UVER" ]; then
+            UVER="${{ github.event.inputs.unityVersion }}"
+          fi
+          echo "unity=$UVER" >> $GITHUB_OUTPUT
+          echo "Package: $NAME  Version: $VER  Unity: $UVER"
+
+      - name: Validate tag vs package.json (on tag push)
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          VER="${{ steps.readpkg.outputs.version }}"
-          if [ "$TAG" != "$VER" ]; then
-            echo "Tag ($TAG) != version ($VER) di package.json"; exit 1
+          VER="${{ steps.meta.outputs.version }}"
+          TAG_NOV=${TAG#v}
+          if [ "$TAG_NOV" != "$VER" ]; then
+            echo "Tag ($TAG) != version ($VER) in package.json"; exit 1
           fi
 
-      - name: Small summary (started)
-        shell: bash
-        run: |
-          echo "Build started for ${{ steps.readpkg.outputs.name }}@${{ steps.readpkg.outputs.version }}" > $GITHUB_STEP_SUMMARY
+      - name: Summary (started)
+        run: echo "Build started for ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" > $GITHUB_STEP_SUMMARY
 
   build:
-    name: Build & Package
+    name: Build DLL & Package ZIP
     runs-on: ubuntu-latest
     needs: prepare
     outputs:
       zipfile: ${{ steps.pkgzip.outputs.zip }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Login Docker Hub (avoid rate-limit)
+        uses: docker/login-action@v3
         with:
-          dotnet-version: '8.0.x'
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Install zip (Ubuntu)
+      - name: Pick UnityCI image (try 3.1 then 3.0)
+        id: pickimg
+        env:
+          U: ${{ needs.prepare.outputs.unity }}
+        run: |
+          set -e
+          IMG1="unityci/editor:${U}-base-3.1"
+          IMG2="unityci/editor:${U}-base-3.0"
+          if docker manifest inspect "$IMG1" >/dev/null 2>&1; then
+            echo "image=$IMG1" >> $GITHUB_OUTPUT
+          elif docker manifest inspect "$IMG2" >/dev/null 2>&1; then
+            echo "image=$IMG2" >> $GITHUB_OUTPUT
+          else
+            echo "No unityci/editor image for $U (tried $IMG1, $IMG2)"; exit 1
+          fi
+
+      - name: Install zip
         run: sudo apt-get update && sudo apt-get install -y zip
 
-      - name: Build Core DLL in UnityCI container
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/*.csproj') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      - name: Build Core DLL in UnityCI container (fast, no editor launch)
         uses: addnab/docker-run-action@v3
         with:
-          image: unityci/editor:2022.3.22f1-base-3.0
+          image: ${{ steps.pickimg.outputs.image }}
           options: -v ${{ github.workspace }}:/workspace -w /workspace
           run: |
-            echo "=== File .cs trovati in Editor ==="
-            find Editor -name "*.cs" | wc -l
-            find Editor -name "*.cs" | head -10
-            echo "=================================="
+            set -e
             export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
-            # Install .NET SDK 8 inside the container
+            echo "Using UNITY_MANAGED=$UNITY_MANAGED"
+
+            # dotnet SDK (leggero)
             curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
             chmod +x dotnet-install.sh
             ./dotnet-install.sh --channel 8.0
             export PATH=$HOME/.dotnet:$PATH
             dotnet --info
-            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
 
-      - name: Integrate DLL in package (clean Editor/ and inject asmdef that references DLL)
-        shell: bash
-        run: |
-          set -e
-          # Clean Editor folder and recreate it fresh
-          rm -rf Editor || true
-          mkdir -p Editor
-          # Create a minimal asmdef that references the precompiled DLL (runtime is Editor only)
-          echo '{' > Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "name": "AvatarSmartBackups.Editor",' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "references": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "includePlatforms": ["Editor"],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "excludePlatforms": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "allowUnsafeCode": false,' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "overrideReferences": false,' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "precompiledReferences": ["AvatarSmartBackups.Core.dll"],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "autoReferenced": true,' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "defineConstraints": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "versionDefines": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "noEngineReferences": false' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '}' >> Editor/AvatarSmartBackups.Editor.asmdef
-          # Copy DLL next to the asmdef
-          DLL_SRC="src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll"
-          if [ ! -f "$DLL_SRC" ]; then
-            echo "ERROR: DLL not found at $DLL_SRC"
-            ls -la src/AvatarSmartBackups.Core/bin/Release || true
-            exit 1
-          fi
-          cp "$DLL_SRC" Editor/
+            # >>> modifica se il .csproj cambia posizione <<<
+            PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
+            REF_PATH="$UNITY_MANAGED;$UNITY_MANAGED/UnityEngine;$UNITY_MANAGED/UnityEditor"
+
+            dotnet restore "$PROJ"
+            dotnet build "$PROJ" -c Release -p:ReferencePath="$REF_PATH" -p:WarningsAsErrors=false
+
+            DLL=src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
+            test -f "$DLL" || (echo "DLL non trovata ($DLL)"; ls -la src/AvatarSmartBackups.Core/bin/Release || true; exit 1)
+
+            # Prepara Editor/ con asmdef che referenzia la DLL
+            rm -rf Editor || true
+            mkdir -p Editor
+            cat > Editor/AvatarSmartBackups.Editor.asmdef <<'JSON'
+            {
+              "name": "AvatarSmartBackups.Editor",
+              "references": [],
+              "includePlatforms": ["Editor"],
+              "excludePlatforms": [],
+              "allowUnsafeCode": false,
+              "overrideReferences": false,
+              "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
+              "autoReferenced": true,
+              "defineConstraints": [],
+              "versionDefines": [],
+              "noEngineReferences": false
+            }
+            JSON
+            cp "$DLL" Editor/
 
       - id: pkgzip
-        name: Create VPM ZIP
-        shell: bash
+        name: Create VPM ZIP (package.json + Editor/*)
         run: |
           set -e
           NAME="${{ needs.prepare.outputs.pkgname }}"
           VER="${{ needs.prepare.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
-          # ensure package.json and Editor exist
-          if [ ! -f package.json ]; then echo "package.json missing"; exit 1; fi
+          [ -f package.json ] || (echo "package.json missing" && exit 1)
           zip -r "$ZIP" package.json Editor
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
+          mkdir -p artifact && mv "$ZIP" artifact/
 
       - name: Upload ZIP artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ steps.pkgzip.outputs.zip }}
+          path: artifact/*.zip
 
   publish:
     name: Publish Release & Update listing
@@ -146,12 +193,10 @@ jobs:
           path: ./artifact
 
       - name: Inspect downloaded artifact
-        shell: bash
-        run: |
-          ls -la artifact
+        run: ls -la artifact
 
       - name: Publish release to PUBLIC repo (softprops) [on tag]
-        id: publish_release_softprops
+        id: softprops
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         continue-on-error: true
@@ -161,11 +206,11 @@ jobs:
           tag_name: ${{ needs.prepare.outputs.version }}
           name: ${{ needs.prepare.outputs.version }}
           files: artifact/*
-          overwrite_files: true
+          overwrite: true
+          generate_release_notes: true
 
       - name: Fallback publish via gh (retry) [on tag]
-        if: startsWith(github.ref, 'refs/tags/') && steps.publish_release_softprops.outcome != 'success'
-        shell: bash
+        if: startsWith(github.ref, 'refs/tags/') && steps.softprops.outcome != 'success'
         env:
           GH_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
         run: |
@@ -194,11 +239,8 @@ jobs:
           token: ${{ secrets.DIST_REPO_TOKEN }}
           path: listing
 
-      
-
       - name: Patch listing/source.json
         if: startsWith(github.ref, 'refs/tags/')
-        shell: bash
         working-directory: listing
         run: |
           set -e
@@ -209,36 +251,26 @@ jobs:
 
           [ -f source.json ] || echo '{"packages":[]}' > source.json
 
-          # Se il JSON non è valido (es. virgole finali), sanificalo in un file temporaneo
           SAN="source.sanitized.json"
           if ! jq '.' source.json >/dev/null 2>&1; then
-            echo "source.json non è valido, tentativo di sanificazione con perl..."
-            # Usa perl per rimuovere virgole finali prima di } o ]
             perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
-            echo "--- Contenuto sanificato ---"
-            cat "$SAN"
-            echo "--------------------------"
           else
             cp source.json "$SAN"
           fi
 
-          # Aggiorna il listing sul file sanificato poi sovrascrive source.json
           jq --arg name "$NAME" --arg url "$URL" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
             | if (.packages | map(.name) | index($name)) != null then
                 (.packages |= map(
                   if .name == $name then
-                    (.releases //= [])
-                    | .releases += [$url]
-                    | .releases |= unique
+                    (.releases //= []) | .releases += [$url] | .releases |= unique
                   else . end))
               else
                 (.packages += [{name: $name, releases: [$url]}])
               end
           ' "$SAN" > source.tmp && mv source.tmp source.json
 
-          # Verifica JSON finale valido
           jq '.' source.json >/dev/null
 
           if git diff --quiet; then
@@ -255,7 +287,6 @@ jobs:
 
       - name: Final summary (done)
         if: always()
-        shell: bash
         run: |
           echo "Build finished for ${{ needs.prepare.outputs.pkgname }}@${{ needs.prepare.outputs.version }}" > $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
