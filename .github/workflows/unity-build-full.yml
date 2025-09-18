@@ -105,14 +105,34 @@ jobs:
           path: ${{ steps.cachedirs.outputs.dotnet_dir }}
           key: dotnet-sdk-${{ runner.os }}-8.0
 
+      # === CACHE DOCKER IMAGE ===
+      - name: Cache Docker image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/docker-cache
+          key: docker-${{ env.UNITY_IMAGE }}-${{ runner.os }}
+          restore-keys: |
+            docker-unityci-${{ runner.os }}-
+
+      - name: Load cached image or pull fresh
+        run: |
+          IMAGE="${{ env.UNITY_IMAGE }}"
+          if [ -f /tmp/docker-cache/image.tar ]; then
+            echo "Loading cached Docker image..."
+            docker load < /tmp/docker-cache/image.tar
+          else
+            echo "Cache miss, pulling fresh image..."
+            docker pull "$IMAGE"
+            mkdir -p /tmp/docker-cache
+            echo "Caching image for next run..."
+            docker save "$IMAGE" > /tmp/docker-cache/image.tar
+          fi
+
       - name: Build Core DLL in UnityCI container (fast, no editor launch)
         run: |
           set -e
           
-          # Usa le credenziali del login precedente per pullare l'immagine
-          docker pull ${{ env.UNITY_IMAGE }}
-          
-          # Esegui il container con i mount corretti
+          # Esegui il container con i mount corretti (immagine già caricata dalla cache)
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
             -v ${{ runner.temp }}/nuget-cache:/root/.nuget/packages \
