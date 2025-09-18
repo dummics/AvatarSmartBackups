@@ -1,0 +1,25 @@
+name: unity-plugin-tests
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "*"
+
+jobs:
+  test:
+    name: Run editor utility tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore tests/AvatarSmartBackups.Tests/AvatarSmartBackups.Tests.csproj
+
+      - name: Run unit tests
+        run: dotnet test tests/AvatarSmartBackups.Tests/AvatarSmartBackups.Tests.csproj --configuration Release
