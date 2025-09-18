@@ -132,8 +132,8 @@ jobs:
             PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
 
             UNITY_MANAGED="/opt/unity/Editor/Data/Managed"
-            REF_PATH="$UNITY_MANAGED;$UNITY_MANAGED/UnityEngine;$UNITY_MANAGED/UnityEditor"
-
+            REF_PATH="$UNITY_MANAGED:$UNITY_MANAGED/UnityEngine:$UNITY_MANAGED/UnityEditor"
+            
             dotnet restore "$PROJ"
             dotnet build "$PROJ" -c Release -p:ReferencePath="$REF_PATH" -p:WarningsAsErrors=false
 

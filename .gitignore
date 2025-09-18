@@ -19,3 +19,6 @@ Temp/
 
 # VS Code settings (optional, remove if you want to commit)
 .vscode/
+
+# Custom scripts
+CreateTag.ps1
