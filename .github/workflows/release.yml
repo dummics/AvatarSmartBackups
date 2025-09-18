@@ -131,8 +131,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: test-${{ needs.prepare.outputs.version }}
-          name: Test Release ${{ needs.prepare.outputs.version }}
+          tag_name: test-${{ needs.prepare.outputs.version }}-${{ github.run_number }}
+          name: Test Release ${{ needs.prepare.outputs.version }} (Run ${{ github.run_number }})
           files: artifact/*
 
       - name: Update listing/source.json in public repo (only on tag)
