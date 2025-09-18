@@ -144,6 +144,7 @@ jobs:
               export DOTNET_CLI_TELEMETRY_OPTOUT=1
               export DOTNET_NOLOGO=1
 
+              # Verifica struttura Unity nell immagine
               echo "=== Unity Installation Check ==="
               for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
                 echo "Trying: $d"
@@ -151,6 +152,7 @@ jobs:
               done
               echo "================================"
 
+              # dotnet SDK (usa cache montata in /root/.dotnet)
               if ! command -v dotnet >/dev/null 2>&1; then
                 curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
                 chmod +x dotnet-install.sh
@@ -196,14 +198,14 @@ jobs:
                 -p:UNITY_MANAGED="$UNITY_MANAGED" \
                 -p:WarningsAsErrors=false
 
-              # ---- Individua la DLL prodotta in modo robusto ----
+              # ---- TROVA la DLL prodotta (robusto) ----
               OUTDIR="$(dirname "$PROJ")/bin/Release"
               echo "Search built DLL under: $OUTDIR"
               FOUND_DLL="$(find "$OUTDIR" -type f -name "AvatarSmartBackups.Core.dll" | head -n1 || true)"
               if [ -z "$FOUND_DLL" ]; then
                 echo "WARNING: AvatarSmartBackups.Core.dll not found by name; listing DLLs for debug:"
-                find "$OUTDIR" -type f -name "*.dll" -maxdepth 3 -ls || true
-                # Prova fallback: prendi la dll più grande che NON sia reference assemblies
+                find "$OUTDIR" -maxdepth 4 -type f -name "*.dll" -printf "%p (%s bytes)\n" | sed -e "s#^#  #"
+                # Fallback: prendi la dll più grande nell output
                 FOUND_DLL="$(find "$OUTDIR" -type f -name "*.dll" -printf "%s %p\n" | sort -nr | awk "NR==1{print \$2}")"
               fi
               if [ -z "$FOUND_DLL" ] || [ ! -f "$FOUND_DLL" ]; then
@@ -212,10 +214,12 @@ jobs:
               fi
               echo "Using built DLL: $FOUND_DLL"
 
-              # ---- Prepara Editor/ e copia con nome fisso ----
+              # ---- Prepara Editor/ e copia la DLL con nome fisso ----
               rm -rf Editor || true
               mkdir -p Editor
-              cat > Editor/AvatarSmartBackups.Editor.asmdef <<'"'"'JSON'"'"'
+
+              # (Semplifica l'here-doc per evitare problemi di quote in YAML)
+              cat > Editor/AvatarSmartBackups.Editor.asmdef <<EOF
               {
                 "name": "AvatarSmartBackups.Editor",
                 "references": [],
@@ -229,33 +233,38 @@ jobs:
                 "versionDefines": [],
                 "noEngineReferences": false
               }
-              JSON
+              EOF
 
-              # Copia e rinomina se necessario
-              install -m 0644 "$FOUND_DLL" "Editor/AvatarSmartBackups.Core.dll"
+              # copia la DLL (niente install -m)
+              cp -f "$FOUND_DLL" "Editor/AvatarSmartBackups.Core.dll"
 
-              echo "Editor folder content after copy:"
+              echo "Editor folder content after copy (inside container):"
               ls -la Editor
             '
 
+      - id: pkgzip
+        name: Create VPM ZIP (package.json + Editor/*)
+        run: |
+          set -e
+          NAME="${{ needs.prepare.outputs.pkgname }}"
+          VER="${{ needs.prepare.outputs.version }}"
+          ZIP="${NAME}-${VER}.zip"
+          [ -f package.json ] || (echo "package.json missing" && exit 1)
+          mkdir -p artifact
+          zip -r "artifact/$ZIP" package.json Editor
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
 
-            - id: pkgzip
-              name: Create VPM ZIP (package.json + Editor/*)
-              run: |
-                set -e
-                NAME="${{ needs.prepare.outputs.pkgname }}"
-                VER="${{ needs.prepare.outputs.version }}"
-                ZIP="${NAME}-${VER}.zip"
-                [ -f package.json ] || (echo "package.json missing" && exit 1)
-                mkdir -p artifact
-                zip -r "artifact/$ZIP" package.json Editor
-                echo "zip=$ZIP" >> $GITHUB_OUTPUT
+      - name: Inspect Editor on host (post-container)
+        run: |
+          set -e
+          echo "Host-side Editor content:"
+          ls -la Editor || true
 
-            - name: Upload ZIP artifact
-              uses: actions/upload-artifact@v4
-              with:
-                name: ${{ env.ARTIFACT_NAME }}
-                path: artifact/*.zip
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact/*.zip
 
   publish:
     name: Publish Release & Update listing
