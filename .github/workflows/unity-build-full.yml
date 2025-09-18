@@ -39,26 +39,24 @@ jobs:
           fi
 
       - id: meta
-        name: Read package.json + Unity version
-        shell: bash
+        name: Read package.json metadata
         run: |
           set -e
           VER=$(jq -r '.version' package.json)
           NAME=$(jq -r '.name' package.json)
-          echo "version=$VER" >> $GITHUB_OUTPUT
-          echo "name=$NAME" >> $GITHUB_OUTPUT
+          UNITY=$(jq -r '.unity' package.json)
 
-          # Unity version dal progetto se presente
-          UVER=""
-          if [ -f ProjectSettings/ProjectVersion.txt ]; then
-            UVER=$(grep -oP '(?<=m_EditorVersion: )\S+' ProjectSettings/ProjectVersion.txt || true)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "name=$NAME"   >> $GITHUB_OUTPUT
+
+          if [ "$UNITY" = "null" ] || [ -z "$UNITY" ]; then
+            # fallback manuale se manca
+            UNITY="2022.3.22f1"
           fi
-          # fallback all'input
-          if [ -z "$UVER" ]; then
-            UVER="${{ github.event.inputs.unityVersion }}"
-          fi
-          echo "unity=$UVER" >> $GITHUB_OUTPUT
-          echo "Package: $NAME  Version: $VER  Unity: $UVER"
+          echo "unity=$UNITY" >> $GITHUB_OUTPUT
+
+          echo "Package: $NAME  Version: $VER  Unity: $UNITY"
+
 
       - name: Validate tag vs package.json (on tag push)
         if: startsWith(github.ref, 'refs/tags/')
