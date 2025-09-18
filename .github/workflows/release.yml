@@ -13,6 +13,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Init summary (0%)
+        shell: bash
+        run: |
+          pct=0
+          filled=$((pct/10))
+          empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
+
       - uses: actions/checkout@v4
 
       # Checkout della repo PUBBLICA in ./listing
@@ -22,6 +33,16 @@ jobs:
           repository: dummics/unity-smart-backup
           token: ${{ secrets.DIST_REPO_TOKEN }}
           path: listing
+
+      - name: Update summary (15%)
+        shell: bash
+        run: |
+          pct=15
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
 
       - id: pkg
         name: Leggi versione da package.json
@@ -33,6 +54,16 @@ jobs:
           PY
           )
           echo "version=$ver" >> $GITHUB_OUTPUT
+
+      - name: Update summary (25%)
+        shell: bash
+        run: |
+          pct=25
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
 
       - name: Verifica che il tag combaci con la versione
         if: startsWith(github.ref, 'refs/tags/')
@@ -48,20 +79,67 @@ jobs:
         shell: bash
         run: jq '.' listing/source.json > /dev/null
 
+      - name: Update summary (35%)
+        shell: bash
+        run: |
+          pct=35
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
+      - name: Update summary (45%)
+        shell: bash
+        run: |
+          pct=45
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
+
       - name: Build Core DLL
         run: dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
 
-      - name: Integrate DLL in package
+      - name: Update summary (65%)
         shell: bash
         run: |
-          mkdir -p Plugins
-          cp src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll Plugins/
-          find Editor -name "*.cs" -type f -delete
+          pct=65
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
+
+      - name: Integrate DLL in package (put DLL in Editor/ and remove Editor .cs files)
+        shell: bash
+        run: |
+          # Ensure Editor exists
+          mkdir -p Editor
+
+          # Copy compiled DLL into Editor (not Plugins)
+          cp src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll Editor/ || {
+            echo "DLL not found at expected path, aborting"; exit 1;
+          }
+
+          # Remove all .cs files inside Editor (clean out source .cs placeholders)
+          find Editor -type f -name "*.cs" -exec rm -f {} +
+
+      - name: Update summary (75%)
+        shell: bash
+        run: |
+          pct=75
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
 
       - id: buildzip
         name: Crea ZIP VPM
@@ -74,9 +152,22 @@ jobs:
           )
           VER="${{ steps.pkg.outputs.version }}"
           ZIP="${NAME}-${VER}.zip"
-          zip -r "$ZIP" package.json Editor Plugins
+
+          # Create zip containing only package.json and Editor folder
+          zip -r "$ZIP" package.json Editor
+
           echo "zip=$ZIP" >> $GITHUB_OUTPUT
           echo "name=$NAME" >> $GITHUB_OUTPUT
+
+      - name: Update summary (85%)
+        shell: bash
+        run: |
+          pct=85
+          filled=$((pct/10)); empty=$((10-filled))
+          bar="$(printf '█%.0s' $(seq 1 $filled); printf '░%.0s' $(seq 1 $empty))"
+          echo "## Build Release" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
 
       - name: Pubblica release nella repo PUBBLICA (unity-smart-backup)
         if: startsWith(github.ref, 'refs/tags/')
@@ -130,3 +221,16 @@ jobs:
           git commit -m "Add $VER for $NAME to source.json"
           git pull --ff-only
           git push origin HEAD:main
+
+      - name: Final summary (100%)
+        if: always()
+        shell: bash
+        run: |
+          pct=100
+          filled=10
+          bar="$(printf '█%.0s' $(seq 1 $filled))"
+          echo "## Build Release — Done ✅" > $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Progress:** $bar $pct%" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- ZIP: ${{ steps.buildzip.outputs.zip }}" >> $GITHUB_STEP_SUMMARY
