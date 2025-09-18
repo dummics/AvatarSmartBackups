@@ -7,11 +7,22 @@
     <OutputType>Library</OutputType>
     <AssemblyName>AvatarSmartBackups.Core</AssemblyName>
     <RootNamespace>AvatarSmartBackup</RootNamespace>
+    <DefineConstants>UNITY_EDITOR</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Includi tutti i file .cs dalla codebase effettiva -->
-    <Compile Include="..\..\Editor\**\*.cs" Exclude="..\..\Editor\**\*Test*.cs" />
+    <Compile Include="..\..\Editor\**\*.cs" Exclude="..\..\Editor\**\*Test*.cs;..\..\Editor\Utils\HashKind.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="UnityEditor">
+      <HintPath>C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed\UnityEditor.dll</HintPath>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed\UnityEngine.dll</HintPath>
+    </Reference>
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
 
   <!-- Consente il build di net48 su ambienti non-Windows (GitHub Actions Ubuntu) -->
