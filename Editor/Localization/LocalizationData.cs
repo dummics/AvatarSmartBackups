@@ -424,7 +424,7 @@ namespace AvatarSmartBackup.Localization
                 {"window.main.autobackup.help", "Le copie di sicurezza automatiche vengono eseguite in background. Usa \"Backup ora\" per forzarne una (con limitazione)."},
                 {"window.main.header", "Avatar Smart Backup"},
                 {"window.main.title", "Avatar Smart Backup"},
-                {"window.version.history.help", "Le versioni sono di due tipi: checkpoint completi e incrementali. Le versioni incrementali contengono solo le modifiche rispetto al checkpoint precedente."}
+                {"window.version.history.help", "Le versioni sono di due tipi: checkpoint completi e incrementali. Le versioni incrementali contengono solo le modifiche rispetto al checkpoint precedente."},
             {"ui.advanced.settings", "Impostazioni avanzate"},
             {"ui.versioning.policy.title", "Politica versioning"},
             {"ui.versioning.policy.option.balanced", "Automatica"},
