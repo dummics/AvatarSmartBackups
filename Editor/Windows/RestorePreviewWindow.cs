@@ -524,7 +524,7 @@ namespace AvatarSmartBackup
                     _showNamesOnly = newNamesOnly;
                     _highlightMatches = newHighlight;
                 }
-                if (GUILayout.Button(L.T("rp.reset", "Reset"), GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
+                if (GUILayout.Button(L.T("rp.reset", "Reset"), GUILayout.Width(60))) { _showNew=_showChanged=_showSame=true; _hideMeta=true; _showNamesOnly=false; _highlightMatches=true; _filter=""; foreach (var kv in _categoryCache) kv.Value.dirty=true; }
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.LabelField(L.T("rp.search", "Search:"), GUILayout.Width(48));
                 _filter = GUILayout.TextField(_filter, GUILayout.Width(220));
@@ -658,6 +658,7 @@ namespace AvatarSmartBackup
             _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent(L.T("rp.safety", "Safety Backup"), L.T("rp.safety.tt", "Create PreRestore copy before restoring")), GUILayout.Width(120));
             int selectedCount = 0; long selectedSize = 0; for (int i=0;i<_diffInfos.Count;i++) if (_selected[i]) { selectedCount++; selectedSize += _diffInfos[i].size; }
             GUILayout.Label(string.Format(L.T("rp.selected.summary", "Selected: {0} files ({1})"), selectedCount, FormatSize(selectedSize)), EditorStyles.miniLabel);
+            if (GUILayout.Button(new GUIContent(L.T("rp.restore.copy", "Restore as Copy"), L.T("rp.restore.copy.tt", "Copy selected files to another folder")), GUILayout.Width(150), GUILayout.Height(24))) { DoRestore(true); }
             if (GUILayout.Button(new GUIContent(L.T("rp.restore.selected", "Restore Selected"), L.T("rp.restore.selected.tt", "Restore selected files")), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
             EditorGUILayout.EndHorizontal();
 
@@ -670,7 +671,10 @@ namespace AvatarSmartBackup
             }
         }
     
-        void DoRestore()
+
+        
+
+        void DoRestore(bool restoreAsCopy = false)
         {
             string srcRoot;
             if (_versionId > 0)
@@ -688,54 +692,106 @@ namespace AvatarSmartBackup
                 }
                 catch (Exception ex)
                 {
-                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepareVersion.fail", "Failed to prepare version data: \n{0}"), ex.Message), "OK");
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.prepareVersion.fail", "Failed to prepare version data:
+{0}"), ex.Message), "OK");
                     return;
                 }
             }
             else
             {
                 srcRoot = Path.Combine(FileUtilEx.BackupRoot, "Current");
-                if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.current.notfound", "No Current/ backup found."), "OK"); return; }
+                if (!Directory.Exists(srcRoot))
+                {
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.current.notfound", "No Current/ backup found."), "OK");
+                    return;
+                }
                 var ok = Path.Combine(srcRoot, "backup.ok");
-                if (!File.Exists(ok)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.restore.incomplete", "Backup in progress or not complete."), "OK"); return; }
+                if (!File.Exists(ok))
+                {
+                    EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.restore.incomplete", "Backup in progress or not complete."), "OK");
+                    return;
+                }
                 _snapshotWarning = null;
             }
-            if (!Directory.Exists(srcRoot)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.version.notfound", "Version files not found."), "OK"); return; }
-    
+
+            if (!Directory.Exists(srcRoot))
+            {
+                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.version.notfound", "Version files not found."), "OK");
+                return;
+            }
+
+            string targetRoot;
+            if (restoreAsCopy)
+            {
+                targetRoot = EditorUtility.OpenFolderPanel(L.T("rp.restore.copy.select", "Choose destination folder"), FileUtilEx.ProjectRoot, string.Empty);
+                if (string.IsNullOrEmpty(targetRoot))
+                    return;
+            }
+            else
+            {
+                targetRoot = FileUtilEx.ProjectRoot;
+            }
+
             _currentVersionRoot = srcRoot;
-            // Se richiesto, fai backup corrente degli Assets prima di sovrascrivere
-            if (_backupBefore)
+
+            if (!restoreAsCopy && _backupBefore)
             {
                 string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
                 string safedir = Path.Combine(FileUtilEx.BackupRoot, "PreRestore", stamp);
-                try { foreach (var f in Directory.GetFiles(Path.Combine(FileUtilEx.ProjectRoot, "Assets"), "*", SearchOption.AllDirectories))
+                try
+                {
+                    foreach (var f in Directory.GetFiles(Path.Combine(FileUtilEx.ProjectRoot, "Assets"), "*", SearchOption.AllDirectories))
                     {
-                        var rel = FileUtilEx.MakeRelToProject(f).Replace("\\", "/");
+                        var rel = FileUtilEx.MakeRelToProject(f).Replace("\", "/");
                         var dst = Path.Combine(safedir, rel);
                         Directory.CreateDirectory(Path.GetDirectoryName(dst));
                         File.Copy(f, dst, true);
                     }
                     Log.Info("Pre-restore backup created: " + safedir);
                 }
-                catch (Exception ex) { Log.Warn("Pre-restore backup failed: " + ex.Message); if (!EditorUtility.DisplayDialog(L.T("rp.backup.failed.title", "Backup failed"), L.T("rp.backup.failed.body", "Pre-restore backup failed. Continue restore anyway?"), L.T("rp.yes", "Yes"), L.T("rp.no", "No"))) return; }
+                catch (Exception ex)
+                {
+                    Log.Warn("Pre-restore backup failed: " + ex.Message);
+                    if (!EditorUtility.DisplayDialog(L.T("rp.backup.failed.title", "Backup failed"), L.T("rp.backup.failed.body", "Pre-restore backup failed. Continue restore anyway?"), L.T("rp.yes", "Yes"), L.T("rp.no", "No")))
+                        return;
+                }
             }
-    
+
             int restored = 0;
             for (int i = 0; i < _files.Count; i++)
             {
                 if (!_selected[i]) continue;
                 string rel = _files[i].Replace("/", Path.DirectorySeparatorChar.ToString());
                 string src = Path.Combine(srcRoot, rel);
-                string dst = Path.Combine(FileUtilEx.ProjectRoot, rel);
-                try { Directory.CreateDirectory(Path.GetDirectoryName(dst)); File.Copy(src, dst, true); restored++; }
-                catch (Exception ex) { Log.Warn("Restore: failed to copy " + rel + " – " + ex.Message); }
+                string dst = Path.Combine(targetRoot, rel);
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(dst));
+                    File.Copy(src, dst, true);
+                    restored++;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("Restore: failed to copy " + rel + " - " + ex.Message);
+                }
             }
-            AssetDatabase.Refresh();
-            EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.done", "Restore completed. Files restored: {0}"), restored), "OK");
-            Close();
+
+            if (!restoreAsCopy)
+            {
+                AssetDatabase.Refresh();
+                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.done", "Restore completed. Files restored: {0}"), restored), "OK");
+                Close();
+            }
+            else
+            {
+                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), string.Format(L.T("rp.restore.copy.done", "Files copied: {0}
+Destination: {1}"), restored, targetRoot), "OK");
+                if (!string.IsNullOrEmpty(targetRoot))
+                    EditorUtility.RevealInFinder(targetRoot);
+            }
         }
 
-        void SelectAllInternal(bool val)
+                void SelectAllInternal        void SelectAllInternal(bool val)
         { for (int i=0;i<_selected.Count;i++) _selected[i] = val; _selectAll = val; }
 
         string FormatSize(long bytes)
