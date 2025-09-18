@@ -1,4 +1,5 @@
-name: build-release-full
+name: Avatar Smart Backup Release
+run-name: Release ${{ github.ref_name }} - Avatar Smart Backup
 
 on:
   workflow_dispatch:
@@ -322,11 +323,12 @@ jobs:
         working-directory: listing
         run: |
           set -e
-          TAG="${GITHUB_REF#refs/tags/}"                              # es: v1.2.3
-          VER="${{ needs.prepare.outputs.version }}"                   # es: 1.2.3
-          NAME="${{ needs.prepare.outputs.pkgname }}"
+          TAG="${GITHUB_REF#refs/tags/}"                              # es: v0.1.9
+          VER="${{ needs.prepare.outputs.version }}"                   # es: 0.1.9
+          NAME="${{ needs.prepare.outputs.pkgname }}"                  # es: dum.incb.system
           ZIPNAME="${NAME}-${VER}.zip"
           URL="https://github.com/dummics/unity-smart-backup/releases/download/${TAG}/${ZIPNAME}"
+          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
           # Assicurati che esista il file
           [ -f source.json ] || echo '{"packages":[]}' > source.json
@@ -339,38 +341,39 @@ jobs:
             cp source.json "$SAN"
           fi
 
-          # Update struttura con la nuova release URL
-          jq --arg name "$NAME" --arg url "$URL" '
+          # Aggiorna/crea il pacchetto:
+          # - aggiunge l'URL release (unique)
+          # - AGGIORNA SEMPRE updatedAt (così il file cambia e il workflow con paths: si attiva)
+          jq --arg name "$NAME" --arg url "$URL" --arg now "$NOW" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
             | if (.packages | map(.name) | index($name)) != null then
                 (.packages |= map(
                   if .name == $name then
-                    (.releases //= []) | .releases += [$url] | .releases |= unique
+                    .updatedAt = $now
+                    | (.releases //= [])
+                    | .releases += [$url]
+                    | .releases |= unique
                   else . end))
               else
-                (.packages += [{name: $name, releases: [$url]}])
+                (.packages += [{name: $name, updatedAt: $now, releases: [$url]}])
               end
           ' "$SAN" > source.tmp && mv source.tmp source.json
 
           # Verifica JSON finale
           jq '.' source.json >/dev/null
 
-          # Config git e commit (anche vuoto per triggerare workflow downstream)
+          # Config git e commit (SEMPE cambia source.json grazie a updatedAt)
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add source.json
-          if git diff --cached --quiet; then
-            echo "Nessuna modifica a source.json; creo un commit vuoto per triggerare il refresh del listing"
-            git commit --allow-empty -m "chore(listing): refresh $NAME v$VER ($(date -u +"%Y-%m-%dT%H:%M:%SZ"))"
-          else
-            git commit -m "Release $NAME v$VER"
-          fi
+          git commit -m "Release $NAME $VER (@${TAG}) – update listing at $NOW"
 
-          # Forza remote con PAT e push
+          # Forza remote con PAT e push (serve scope: repo + workflow)
           git remote set-url origin "https://x-access-token:${{ secrets.DIST_REPO_TOKEN }}@github.com/dummics/unity-smart-backup.git"
           git pull --ff-only
           git push origin HEAD:main
+
 
       - name: Final summary (done)
         if: always()
