@@ -1,4 +1,4 @@
-name: build-release
+name: build-release-old
 
 on:
   workflow_dispatch:
@@ -16,6 +16,7 @@ jobs:
   prepare:
     name: Prepare (read version & validate)
     runs-on: ubuntu-latest
+    if: false
     outputs:
       version: ${{ steps.readpkg.outputs.version }}
       pkgname: ${{ steps.readpkg.outputs.name }}
