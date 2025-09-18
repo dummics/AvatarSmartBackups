@@ -223,24 +223,23 @@ jobs:
               cp "$DLL" Editor/
             '
 
+      - id: pkgzip
+        name: Create VPM ZIP (package.json + Editor/*)
+        run: |
+          set -e
+          NAME="${{ needs.prepare.outputs.pkgname }}"
+          VER="${{ needs.prepare.outputs.version }}"
+          ZIP="${NAME}-${VER}.zip"
+          [ -f package.json ] || (echo "package.json missing" && exit 1)
+          mkdir -p artifact
+          zip -r "artifact/$ZIP" package.json Editor
+          echo "zip=$ZIP" >> $GITHUB_OUTPUT
 
-            - id: pkgzip
-              name: Create VPM ZIP (package.json + Editor/*)
-              run: |
-                set -e
-                NAME="${{ needs.prepare.outputs.pkgname }}"
-                VER="${{ needs.prepare.outputs.version }}"
-                ZIP="${NAME}-${VER}.zip"
-                [ -f package.json ] || (echo "package.json missing" && exit 1)
-                mkdir -p artifact
-                zip -r "artifact/$ZIP" package.json Editor
-                echo "zip=$ZIP" >> $GITHUB_OUTPUT
-
-            - name: Upload ZIP artifact
-              uses: actions/upload-artifact@v4
-              with:
-                name: ${{ env.ARTIFACT_NAME }}
-                path: artifact/*.zip
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact/*.zip
 
   publish:
     name: Publish Release & Update listing
