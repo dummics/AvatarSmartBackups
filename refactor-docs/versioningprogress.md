@@ -7,7 +7,6 @@
 - Preparare il terreno per ottimizzazioni future (diff in background, move tracking, repository locale).
 
 ## TODO (ordine operativo)
-## TODO (ordine operativo)
 1. **Analisi UI & architettura**
    - [x] Mappare le funzionalità core di `RestorePreviewWindow` e `VersionChangesWindow`.
    - [x] Definire layout unificato (lista + pannello azioni/info) e scheletro dati condiviso.
