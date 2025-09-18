@@ -88,6 +88,11 @@ namespace AvatarSmartBackup
             if (s.diskCriticalFreePercent > 0.3f) s.diskCriticalFreePercent = 0.3f;
             if (s.diskPreBackupBufferMB < 0) s.diskPreBackupBufferMB = 0;
 
+            if (!s.AdvancedMode && !s.easyMode)
+                s.easyMode = true;
+            else if (s.AdvancedMode && s.easyMode)
+                s.easyMode = false;
+
             // Sync dropdown presets with stored numeric limits (for backward compatibility)
             long[] presetVals = new long[] { 256, 512, 1024, 2048, 4096 };
             int CustomIdx = 5;

@@ -11,8 +11,8 @@
    - [x] Mappare le funzionalità core di `RestorePreviewWindow` e `VersionChangesWindow`.
    - [x] Definire layout unificato (lista + pannello azioni/info) e scheletro dati condiviso.
 2. **Finestra unificata Restore+Changes**
-   - [~] Portare nella nuova finestra i componenti migliori di Show Changes (badge, ricerca, toggle filename, highlight).
-   - [~] Integrare controlli di Restore: grouping per categorie, filtri extra, top extensions, selezione e pulsanti Restore/Restore as copy.
+   - [x] Portare nella nuova finestra i componenti migliori di Show Changes (badge, ricerca, toggle filename, highlight).
+   - [x] Integrare controlli di Restore: grouping per categorie, filtri extra, top extensions, selezione e pulsanti Restore/Restore as copy.
    - [x] Aggiornare localizzazioni e entry point (tab Versions, pulsante "Preview & Restore").
 3. **Fix immediati**
    - [x] Pulsante "Open" dell'EditorWindow deve sempre aprire la tab Backup.
@@ -22,9 +22,10 @@
    - [x] Ridisegnare sezione performance/versioning con nuova "Versioning policy" e benchmark contestualizzato.
    - [x] Snellire strumenti rari dietro fold "Debug tools".
 5. **Easy vs Advanced Mode**
-   - [ ] Allineare Easy mode alla nuova UI unificata (solo azioni essenziali).
-   - [ ] Verificare onboarding forzato e possibilità di switch con feedback.
-   - [ ] Aggiornare copy/tooltips per linguaggio semplice.
+   - [x] Allineare Easy mode alla nuova UI unificata (solo azioni essenziali).
+   - [x] Verificare onboarding forzato e possibilità di switch con feedback.
+   - [x] Aggiornare copy/tooltips per linguaggio semplice.
+   - [x] Correggere encoding/localizzazione italiana per messaggi Easy/Advanced.
 6. **Performance & backend (fase successiva)**
    - [ ] Progettare diff loader asincrono (scan in background + cache).
    - [ ] Prototipare tracking rename/move (hash + metadata).
