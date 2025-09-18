@@ -72,13 +72,16 @@ namespace AvatarSmartBackup
 
             CopyDirectory(checkpointDir, rebuildDir);
 
-            bool missingDelta = false;
-
             for (int i = 1; i < chain.Count; i++)
             {
                 var current = chain[i];
                 string versionDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{current.id:D3}");
                 string deltaRoot = Path.Combine(versionDir, "delta");
+                string deltaMetadataPath = Path.Combine(versionDir, "delta.json");
+                if (!File.Exists(deltaMetadataPath))
+                {
+                    FailDeltaRebuild(vm, target, current, $"Delta metadata missing for version #{current.id}.");
+                }
                 var delta = LoadDeltaMetadata(versionDir);
 
                 foreach (var entry in delta.changedEntries)
@@ -86,9 +89,7 @@ namespace AvatarSmartBackup
                     string src = Path.Combine(deltaRoot, entry.relPath.Replace('/', Path.DirectorySeparatorChar));
                     if (!File.Exists(src))
                     {
-                        Debug.LogWarning($"[ASB] Delta file missing for version #{current.id}: {entry.relPath}");
-                        missingDelta = true;
-                        continue;
+                        FailDeltaRebuild(vm, target, current, $"Delta file missing for version #{current.id}: {entry.relPath}");
                     }
                     string dst = Path.Combine(rebuildDir, entry.relPath.Replace('/', Path.DirectorySeparatorChar));
                     Directory.CreateDirectory(Path.GetDirectoryName(dst));
@@ -116,12 +117,7 @@ namespace AvatarSmartBackup
                 }
             }
 
-            if (missingDelta)
-            {
-                _lastWarning = $"Alcuni delta mancanti nella versione #{target.id}; il contenuto potrebbe essere incompleto.";
-                Log.Warn(_lastWarning);
-                Debug.LogWarning($"[ASB] {_lastWarning}");
-            }
+            ValidateRebuiltSnapshot(vm, target, rebuildDir);
         }
 
         static List<VersionInfo> BuildChain(FileBasedVersionManager vm, VersionInfo target)
@@ -195,6 +191,91 @@ namespace AvatarSmartBackup
             var segments = relativePath.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
             if (segments.Length == 0) return false;
             return string.Equals(segments[0], "delta", StringComparison.OrdinalIgnoreCase);
+        }
+
+        static void FailDeltaRebuild(FileBasedVersionManager vm, VersionInfo target, VersionInfo failingVersion, string reason)
+        {
+            _lastWarning = reason;
+            vm?.MarkVersionCorrupt(failingVersion.id, markIncomplete: true, reason: reason);
+            if (target != null && target.id != failingVersion.id)
+                vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+            Log.Error(reason);
+            Debug.LogError($"[ASB] {reason}");
+            throw new InvalidOperationException(reason);
+        }
+
+        static void ValidateRebuiltSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir)
+        {
+            if (target == null)
+                return;
+
+            string versionDir = Path.Combine(FileUtilEx.BackupRoot, "Versions", $"v{target.id:D3}");
+            string manifestPath = Path.Combine(versionDir, "manifest.json");
+            BackupManifest manifest = null;
+            try
+            {
+                if (!File.Exists(manifestPath))
+                    throw new FileNotFoundException("Manifest not found", manifestPath);
+                string json = File.ReadAllText(manifestPath);
+                manifest = JsonUtility.FromJson<BackupManifest>(json);
+            }
+            catch (Exception ex)
+            {
+                string reason = $"Manifest unavailable for version #{target.id}: {ex.Message}";
+                vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+                Log.Error(reason);
+                Debug.LogError($"[ASB] {reason}");
+                throw new InvalidOperationException(reason, ex);
+            }
+
+            if (manifest?.entries == null)
+            {
+                string reason = $"Manifest for version #{target.id} is empty or invalid.";
+                vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+                Log.Error(reason);
+                Debug.LogError($"[ASB] {reason}");
+                throw new InvalidOperationException(reason);
+            }
+
+            foreach (var entry in manifest.entries)
+            {
+                if (entry == null || string.IsNullOrEmpty(entry.relPath))
+                    continue;
+
+                string dst = Path.Combine(rebuildDir, entry.relPath.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(dst))
+                {
+                    string reason = $"Missing file {entry.relPath} while rebuilding version #{target.id}.";
+                    vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+                    Log.Error(reason);
+                    Debug.LogError($"[ASB] {reason}");
+                    throw new InvalidOperationException(reason);
+                }
+
+                if (string.IsNullOrEmpty(entry.md5))
+                    continue;
+
+                try
+                {
+                    string computed = FileUtilEx.MD5Of(dst);
+                    if (!string.Equals(computed, entry.md5, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string reason = $"Hash mismatch for {entry.relPath} while rebuilding version #{target.id}.";
+                        vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+                        Log.Error(reason);
+                        Debug.LogError($"[ASB] {reason}");
+                        throw new InvalidOperationException(reason);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    string reason = $"Failed to verify hash for {entry.relPath} in version #{target.id}: {ex.Message}";
+                    vm?.MarkVersionCorrupt(target.id, markIncomplete: true, reason: reason);
+                    Log.Error(reason);
+                    Debug.LogError($"[ASB] {reason}");
+                    throw new InvalidOperationException(reason, ex);
+                }
+            }
         }
 
         static string MakeRelative(string path, string root)

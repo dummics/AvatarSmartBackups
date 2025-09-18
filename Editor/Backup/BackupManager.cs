@@ -200,6 +200,47 @@ namespace AvatarSmartBackup
             FileUtilEx.AtomicReplace(tmp, ManifestPath);
         }
 
+        static void RefreshHashesFromCurrent(List<FilePlanItem> files)
+        {
+            if (files == null || files.Count == 0)
+                return;
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var item in files)
+            {
+                if (item?.ManifestEntry == null)
+                    continue;
+
+                if (!item.NeedsCopy && !string.IsNullOrEmpty(item.ManifestEntry.md5))
+                    continue;
+
+                string destination = item.DestinationPath;
+                if (string.IsNullOrEmpty(destination))
+                    continue;
+
+                if (!seen.Add(destination))
+                    continue;
+
+                try
+                {
+                    if (!File.Exists(destination))
+                    {
+                        Log.Warn($"Hash refresh skipped (missing file): {item.ManifestEntry.relPath}");
+                        item.ManifestEntry.md5 = string.Empty;
+                        continue;
+                    }
+
+                    string computed = FileUtilEx.MD5Of(destination);
+                    if (!string.IsNullOrEmpty(computed))
+                        item.ManifestEntry.md5 = computed;
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn($"Failed to refresh hash for {item.ManifestEntry.relPath}: {ex.Message}");
+                }
+            }
+        }
+
         // Removed legacy manifest_v2 support
 
         static void SaveOpenScenesIfDirty()
@@ -665,6 +706,7 @@ namespace AvatarSmartBackup
 
                 // 4) Manifest + prune (nevern thread)
                 PruneRemoved(man);
+                RefreshHashesFromCurrent(plannedFiles);
                 WriteManifest(man);
                 File.WriteAllText(Path.Combine(CurrentDir, "backup.ok"), DateTime.UtcNow.ToString("o"));
 
