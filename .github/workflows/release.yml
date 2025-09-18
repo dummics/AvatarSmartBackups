@@ -193,14 +193,17 @@ jobs:
           # Se il JSON non è valido (es. virgole finali), sanificalo in un file temporaneo
           SAN="source.sanitized.json"
           if ! jq '.' source.json >/dev/null 2>&1; then
-            # Rimuove virgole prima di } o ]
-            sed -E ':a;N;$!ba;s/,([[:space:]]*[}\]])/\1/g' source.json > "$SAN" || cp source.json "$SAN"
+            echo "source.json non è valido, tentativo di sanificazione con perl..."
+            # Usa perl per rimuovere virgole finali prima di } o ]
+            perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
+            echo "--- Contenuto sanificato ---"
+            cat "$SAN"
+            echo "--------------------------"
           else
             cp source.json "$SAN"
           fi
 
           # Aggiorna il listing sul file sanificato poi sovrascrive source.json
-          echo "Sanificazione completata, applicando jq su $SAN"
           jq --arg name "$NAME" --arg url "$URL" '
             (.packages //= [])
             | (.packages |= map(select((.name // "") != "")))
