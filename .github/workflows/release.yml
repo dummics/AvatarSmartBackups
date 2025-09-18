@@ -74,19 +74,19 @@ jobs:
           rm -rf Editor || true
           mkdir -p Editor
           # Create a minimal asmdef that references the precompiled DLL (runtime is Editor only)
-          echo '{'                                   >  Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "name": "AvatarSmartBackups.Editor",'        >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "references": [],'                           >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "includePlatforms": ["Editor"],'           >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "excludePlatforms": [],'                     >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "allowUnsafeCode": false,'                   >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "overrideReferences": false,'                >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '{' > Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "name": "AvatarSmartBackups.Editor",' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "references": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "includePlatforms": ["Editor"],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "excludePlatforms": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "allowUnsafeCode": false,' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "overrideReferences": false,' >> Editor/AvatarSmartBackups.Editor.asmdef
           echo '  "precompiledReferences": ["AvatarSmartBackups.Core.dll"],' >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "autoReferenced": true,'                     >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "defineConstraints": [],'                    >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "versionDefines": [],'                       >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '  "noEngineReferences": false'                 >> Editor/AvatarSmartBackups.Editor.asmdef
-          echo '}'                                               >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "autoReferenced": true,' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "defineConstraints": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "versionDefines": [],' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '  "noEngineReferences": false' >> Editor/AvatarSmartBackups.Editor.asmdef
+          echo '}' >> Editor/AvatarSmartBackups.Editor.asmdef
           # Copy DLL next to the asmdef
           DLL_SRC="src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll"
           if [ ! -f "$DLL_SRC" ]; then
@@ -141,14 +141,66 @@ jobs:
           name: ${{ needs.prepare.outputs.version }}
           files: artifact/*
 
-      - name: Create test release (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
+      - name: Checkout listing repo for update (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: test-${{ needs.prepare.outputs.version }}-${{ github.run_number }}
-          name: Test Release ${{ needs.prepare.outputs.version }} (Run ${{ github.run_number }})
-          files: artifact/*
+          repository: dummics/unity-smart-backup
+          token: ${{ secrets.DIST_REPO_TOKEN }}
+          path: listing
+
+      - name: Update listing/source.json in public repo (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        working-directory: listing
+        env:
+          VER: ${{ needs.prepare.outputs.version }}
+          NAME: ${{ needs.prepare.outputs.pkgname }}
+        run: |
+          set -euo pipefail
+          cd listing
+
+          # Ricalcola tutto QUI dentro
+          VER="${VER:-}"
+          NAME="${NAME:-}"
+          ZIP="${NAME}-${VER}.zip"
+
+          if [[ -z "$VER" || -z "$NAME" ]]; then
+            echo "ERROR: NAME/VER vuoti (needs.prepare.outputs non presenti?)"; exit 1
+          fi
+
+          # Crea il file se manca
+          [ -f source.json ] || echo '{"packages":[]}' > source.json
+
+          # Assicurati che esista il nodo del tuo pacchetto
+          if ! jq -e --arg id "$NAME" '.packages[] | select(.id==$id)' source.json >/dev/null; then
+            tmp=$(mktemp)
+            jq --arg id "$NAME" '.packages += [{id:$id}]' source.json > "$tmp" && mv "$tmp" source.json
+          fi
+
+          # Patch “releaseTag” e “asset” (adatta le chiavi alla tua struttura)
+          tmp=$(mktemp)
+          jq --arg id "$NAME" --arg ver "$VER" --arg zip "$ZIP" '
+            (.packages[] | select(.id==$id) | .releaseTag) = $ver
+            | (.packages[] | select(.id==$id) | .asset)      = $zip
+          ' source.json > "$tmp" && mv "$tmp" source.json
+
+          echo "== source.json aggiornato =="
+          jq -r '.packages[] | {id,releaseTag,asset}' source.json
+
+          # Commit solo se serve
+          if git diff --quiet -- source.json; then
+            echo "Nessuna modifica a source.json, skip."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          git commit -m "listing: ${NAME}@${VER} (${ZIP})"
+          git pull --ff-only
+          git push origin HEAD:main
+
 
       - name: Update listing/source.json in public repo (only on tag)
         if: startsWith(github.ref, 'refs/tags/')
@@ -190,7 +242,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add source.json
-          git commit -m "Add $VER for $NAME to source.json"
+          git commit -m "Release $NAME v$VER"
           git pull --ff-only
           git push origin HEAD:main
 
