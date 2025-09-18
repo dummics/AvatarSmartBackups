@@ -2,9 +2,9 @@ name: unity-plugin-tests
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "*"
+  #push:
+   # tags:
+   #   - "*"
 
 jobs:
   test:

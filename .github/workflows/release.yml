@@ -67,6 +67,28 @@ jobs:
       - name: Install zip (Ubuntu)
         run: sudo apt-get update && sudo apt-get install -y zip
 
+      - name: Cache Docker image
+        uses: actions/cache@v4
+        with:
+          path: /tmp/docker-cache
+          key: docker-unityci-2022.3.22f1-base-3.0
+          restore-keys: |
+            docker-unityci-
+
+      - name: Load cached image or pull fresh
+        run: |
+          IMAGE="unityci/editor:2022.3.22f1-base-3.0"
+          if [ -f /tmp/docker-cache/image.tar ]; then
+            echo "Loading cached Docker image..."
+            docker load < /tmp/docker-cache/image.tar
+          else
+            echo "Cache miss, pulling fresh image..."
+            docker pull "$IMAGE"
+            mkdir -p /tmp/docker-cache
+            echo "Caching image for next run..."
+            docker save "$IMAGE" > /tmp/docker-cache/image.tar
+          fi
+
       - name: Build Core DLL in UnityCI container
         uses: addnab/docker-run-action@v3
         with:
@@ -78,13 +100,15 @@ jobs:
             find Editor -name "*.cs" | head -10
             echo "=================================="
             export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
+            echo "UNITY_MANAGED set to: $UNITY_MANAGED"
             # Install .NET SDK 8 inside the container
             curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
             chmod +x dotnet-install.sh
             ./dotnet-install.sh --channel 8.0
             export PATH=$HOME/.dotnet:$PATH
             dotnet --info
-            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
+            echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
+            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release -p:UNITY_MANAGED="$UNITY_MANAGED"
 
       - name: Integrate DLL in package (clean Editor/ and inject asmdef that references DLL)
         shell: bash
