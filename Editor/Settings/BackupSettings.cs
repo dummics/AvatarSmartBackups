@@ -4,11 +4,20 @@ using System.Collections.Generic;
 
 namespace AvatarSmartBackup
 {
+
+    public enum VersioningPolicy
+    {
+        Balanced = 0,
+        Frequent = 1,
+        Manual = 2
+    }
+
     [Serializable]
     public class BackupSettings
     {
         public bool autoRunOnLoad = true;
         public int intervalMinutes = 10;
+        public VersioningPolicy versioningPolicy = VersioningPolicy.Balanced;
         public bool advancedMode = false;
         public bool debugMode = false;
         public bool intervalInSeconds = false;
@@ -65,9 +74,11 @@ namespace AvatarSmartBackup
         public bool onboardingCompleted = false;
 
         public bool showAdvanced = false;
+        public bool showDebugTools = false;
         public bool useProjectSettings = false;
         
         // Advanced-only options
+        public int manualCheckpointFrequency = 5;
         public int forceFullCheckpointEveryN = 0;
         public bool showRebuildTool = false;
         public bool enableDebugLogging = false;        // Detailed logging to file (advanced mode only)
@@ -95,6 +106,43 @@ namespace AvatarSmartBackup
     // UI state (non critico, serializzato con settings)
     public int _activeTab = 0;              // 0 = Backup, 1 = Versions
     public bool _uiTabInitialized = false;  // evita reset ad ogni domain reload
+
+
+        public void EnsureVersioningDefaults()
+        {
+            if (!Enum.IsDefined(typeof(VersioningPolicy), versioningPolicy))
+                versioningPolicy = VersioningPolicy.Balanced;
+
+            if (manualCheckpointFrequency < 1)
+                manualCheckpointFrequency = Math.Max(3, forceFullCheckpointEveryN > 0 ? forceFullCheckpointEveryN : 5);
+
+            if (versioningPolicy == VersioningPolicy.Balanced && forceFullCheckpointEveryN > 0)
+            {
+                versioningPolicy = VersioningPolicy.Manual;
+                manualCheckpointFrequency = Math.Max(1, forceFullCheckpointEveryN);
+            }
+
+            if (versioningPolicy == VersioningPolicy.Manual && manualCheckpointFrequency < 1)
+                manualCheckpointFrequency = 3;
+        }
+
+        public int GetCheckpointInterval()
+        {
+            switch (versioningPolicy)
+            {
+                case VersioningPolicy.Frequent:
+                    return 3;
+                case VersioningPolicy.Manual:
+                    return Math.Max(1, manualCheckpointFrequency);
+                default:
+                    return 0;
+            }
+        }
+
+        public void SyncLegacyCheckpointInterval()
+        {
+            forceFullCheckpointEveryN = GetCheckpointInterval();
+        }
     }
 }
 #endif

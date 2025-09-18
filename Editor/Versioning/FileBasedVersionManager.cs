@@ -30,11 +30,18 @@ namespace AvatarSmartBackup
 
         private void EnsureIndexFile()
         {
-            if (!File.Exists(_indexFile))
+            if (File.Exists(_indexFile))
+                return;
+
+            string backupIndex = _indexFile + ".bak";
+            if (File.Exists(backupIndex))
             {
-                var index = new VersionIndex { versions = new List<VersionInfo>(), schemaVersion = VersionIndex.CurrentSchemaVersion };
-                SaveIndex(index);
+                Debug.LogWarning($"[ASB] Versions index missing but a backup exists at {backupIndex}. Not recreating automatically.");
+                return;
             }
+
+            var index = new VersionIndex { versions = new List<VersionInfo>(), schemaVersion = VersionIndex.CurrentSchemaVersion };
+            SaveIndex(index);
         }
 
         private VersionIndex LoadIndex()
@@ -42,7 +49,12 @@ namespace AvatarSmartBackup
             try
             {
                 if (!File.Exists(_indexFile))
+                {
+                    string backupPath = _indexFile + ".bak";
+                    if (File.Exists(backupPath))
+                        throw new InvalidOperationException($"Versions index missing. A backup copy exists at {backupPath}. Restore it manually to proceed.");
                     return new VersionIndex { versions = new List<VersionInfo>(), schemaVersion = VersionIndex.CurrentSchemaVersion };
+                }
 
                 string json = File.ReadAllText(_indexFile);
                 var index = JsonUtility.FromJson<VersionIndex>(json) ?? new VersionIndex { versions = new List<VersionInfo>() };
@@ -54,8 +66,10 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[ASB] Failed to load versions index: {ex.Message}");
-                return new VersionIndex { versions = new List<VersionInfo>(), schemaVersion = VersionIndex.CurrentSchemaVersion };
+                TryBackupCorruptIndex();
+                string message = $"[ASB] Failed to load versions index: {ex.Message}. The corrupted file was moved to .bak.";
+                Debug.LogError(message);
+                throw new InvalidOperationException("Versions index could not be loaded. Please inspect the backup copy before continuing.", ex);
             }
         }
 
@@ -67,12 +81,35 @@ namespace AvatarSmartBackup
                 string json = JsonUtility.ToJson(index, true);
                 string tmp = _indexFile + ".tmp";
                 File.WriteAllText(tmp, json);
-                if (File.Exists(_indexFile)) File.Delete(_indexFile);
-                File.Move(tmp, _indexFile);
+                FileUtilEx.AtomicReplace(tmp, _indexFile);
             }
             catch (Exception ex)
             {
                 Debug.LogError($"[ASB] Failed to save versions index: {ex.Message}");
+            }
+        }
+
+        private void TryBackupCorruptIndex()
+        {
+            try
+            {
+                if (!File.Exists(_indexFile)) return;
+
+                string baseBackup = _indexFile + ".bak";
+                string backupPath = baseBackup;
+                int counter = 0;
+                while (File.Exists(backupPath))
+                {
+                    counter++;
+                    backupPath = _indexFile + $".bak{counter}";
+                }
+
+                File.Move(_indexFile, backupPath);
+                Debug.LogWarning($"[ASB] Versions index moved to {backupPath} due to read failure.");
+            }
+            catch (Exception moveEx)
+            {
+                Debug.LogWarning($"[ASB] Failed to move corrupt versions index: {moveEx.Message}");
             }
         }
 
@@ -198,8 +235,10 @@ namespace AvatarSmartBackup
                     CopyDeltaFiles(currentBackupPath, versionDir, diff);
                 }
 
-                File.Copy(manifestPath, Path.Combine(versionDir, ManifestFileName), true);
-                File.WriteAllText(Path.Combine(versionDir, SnapshotMarkerName), "ok");
+                string manifestDestination = Path.Combine(versionDir, ManifestFileName);
+                string manifestTmp = manifestDestination + ".tmp";
+                File.Copy(manifestPath, manifestTmp, true);
+                FileUtilEx.AtomicReplace(manifestTmp, manifestDestination);
 
                 int parentId = latest?.id ?? 0;
                 int checkpointId = isCheckpoint ? nextId : ResolveCheckpointId(latest);
@@ -207,7 +246,14 @@ namespace AvatarSmartBackup
 
                 var deltaMetadata = BuildDeltaMetadata(diff, nextId, isCheckpoint, parentId, checkpointId);
                 string deltaPath = Path.Combine(versionDir, DeltaFileName);
-                File.WriteAllText(deltaPath, JsonUtility.ToJson(deltaMetadata, true));
+                string deltaTmp = deltaPath + ".tmp";
+                File.WriteAllText(deltaTmp, JsonUtility.ToJson(deltaMetadata, true));
+                FileUtilEx.AtomicReplace(deltaTmp, deltaPath);
+
+                string markerPath = Path.Combine(versionDir, SnapshotMarkerName);
+                string markerTmp = markerPath + ".tmp";
+                File.WriteAllText(markerTmp, "ok");
+                FileUtilEx.AtomicReplace(markerTmp, markerPath);
 
                 long totalSize = manifest.entries.Sum(e => Math.Max(0, e.size));
                 int totalCount = manifest.entries.Count;
@@ -294,7 +340,13 @@ namespace AvatarSmartBackup
             if (latest == null)
                 return true;
 
-            int configured = settings?.forceFullCheckpointEveryN ?? 0;
+            int configured = 0;
+            if (settings != null)
+            {
+                settings.EnsureVersioningDefaults();
+                settings.SyncLegacyCheckpointInterval();
+                configured = settings.GetCheckpointInterval();
+            }
             if (configured > 0 && latest.incrementalDepth >= configured - 1)
                 return true;
 
@@ -632,6 +684,38 @@ namespace AvatarSmartBackup
         {
             var index = LoadIndex();
             return index.versions.Count;
+        }
+
+        public void MarkVersionCorrupt(int id, bool markIncomplete, string reason = null)
+        {
+            try
+            {
+                var index = LoadIndex();
+                var version = index.versions?.FirstOrDefault(v => v.id == id);
+                if (version == null) return;
+
+                bool changed = false;
+                if (!version.corrupt)
+                {
+                    version.corrupt = true;
+                    changed = true;
+                }
+                if (markIncomplete && !version.incomplete)
+                {
+                    version.incomplete = true;
+                    changed = true;
+                }
+
+                if (changed)
+                    SaveIndex(index);
+
+                if (!string.IsNullOrEmpty(reason))
+                    Debug.LogError($"[ASB] Version #{id} marked as corrupt: {reason}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[ASB] Failed to mark version #{id} as corrupt: {ex.Message}");
+            }
         }
 
         public VersionIndexRebuildReport RebuildIndex(bool applyChanges)

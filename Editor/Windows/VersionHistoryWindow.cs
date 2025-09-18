@@ -126,18 +126,17 @@ namespace AvatarSmartBackup
                         EditorUtility.DisplayDialog(L.T("vh.folder.notfound.title", "Folder Not Found"), L.T("vh.folder.notfound.body", "The version folder could not be found."), "OK");
                     }
                 }
-                if (GUILayout.Button(L.T("vh.show.changes", "Show Changes"), GUILayout.Width(110), GUILayout.Height(25)))
+                if (GUILayout.Button(L.T("ui.versions.previewRestore", "Preview & Restore"), GUILayout.Width(110), GUILayout.Height(25)))
                 {
                     try
                     {
-                        var meta = VersionRestoreService.LoadDeltaMetadata(version) ?? new VersionDeltaMetadata();
-                        VersionChangesWindow.Open(version, meta);
+                        RestorePreviewWindow.Open(version.id);
                     }
                     catch (Exception ex)
                     {
-                        Log.Warn("Version history diff failed: " + ex.Message);
+                        Log.Warn("Preview & Restore failed: " + ex.Message);
                         var message = string.Format(L.T("vc.error.body", "Unable to read changes:\n{0}"), ex.Message);
-                        EditorUtility.DisplayDialog(L.T("vc.error.title", "Show changes"), message, "OK");
+                        EditorUtility.DisplayDialog(L.T("vc.error.title", "Preview & Restore"), message, "OK");
                     }
                 }
                 EditorGUILayout.EndHorizontal();

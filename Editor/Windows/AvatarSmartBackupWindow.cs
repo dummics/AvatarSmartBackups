@@ -43,8 +43,10 @@ namespace AvatarSmartBackup
         static readonly Color BadgeColorChanged = new Color(0.77f, 0.55f, 0.16f, 0.22f);
         static readonly Color BadgeColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
         const float BadgeWidth = 128f;
+        const int ManualCheckpointMax = 12;
         static GUIStyle _badgeStyle;
         static Texture2D _texExplorer; static bool _texTried;
+        static bool _forceBackupTabOnOpen;
         void EnsureTextures()
         {
             if (!_texTried)
@@ -56,6 +58,7 @@ namespace AvatarSmartBackup
         [MenuItem("Avatar Smart Backup/Open", false, 0)]
         public static void Open()
         {
+            _forceBackupTabOnOpen = true;
             var w = GetWindow<AvatarSmartBackupWindow>(true, AvatarSmartBackup.Localization.L.T("window.main.title", "Avatar Smart Backup"));
             w.minSize = new Vector2(320, 320);
             w.Show();
@@ -73,6 +76,12 @@ namespace AvatarSmartBackup
         void OnEnable()
         {
             _settings = BackupManager.LoadSettings();
+            if (_forceBackupTabOnOpen && _settings != null)
+            {
+                _settings._activeTab = 0;
+                _settings._uiTabInitialized = true;
+                _forceBackupTabOnOpen = false;
+            }
             RunOnboardingIfNeeded();
             BackupEvents.BackupCompleted += OnBackupCompleted;
         }
@@ -81,6 +90,22 @@ namespace AvatarSmartBackup
             BackupEvents.BackupCompleted -= OnBackupCompleted;
             BackupManager.SaveSettings(_settings);
             TimerService.InvalidateSettingsCache();
+        }
+
+        void OpenPreviewRestore(VersionInfo info)
+        {
+            if (info == null) return;
+
+            try
+            {
+                RestorePreviewWindow.Open(info.id);
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("Preview & Restore failed: " + ex.Message);
+                var message = string.Format(AvatarSmartBackup.Localization.L.T("vc.error.body", "Unable to read changes:\n{0}"), ex.Message);
+                EditorUtility.DisplayDialog(AvatarSmartBackup.Localization.L.T("vc.error.title", "Preview & Restore"), message, "OK");
+            }
         }
         void OnBackupCompleted(BackupRunSummary summary)
         {
@@ -265,10 +290,10 @@ namespace AvatarSmartBackup
                 return;
 
             string summary = $"Disk free: {DiskSpaceMonitor.FormatBytes(snapshot.freeBytes)} / {DiskSpaceMonitor.FormatBytes(snapshot.totalBytes)}";
-            summary += $" � Backups: {DiskSpaceMonitor.FormatBytes(snapshot.backupSizeBytes)}";
+            summary += $" � Backups: {DiskSpaceMonitor.FormatBytes(snapshot.backupSizeBytes)}";
             if (report.RequiredBytes > 0 && report.Stage != DiskSpaceStage.PostBackup)
             {
-                summary += $" � Next estimate: {DiskSpaceMonitor.FormatBytes(report.RequiredBytes)}";
+                summary += $" � Next estimate: {DiskSpaceMonitor.FormatBytes(report.RequiredBytes)}";
             }
 
             MessageType type = report.Status switch
@@ -356,7 +381,7 @@ namespace AvatarSmartBackup
                 if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.latest.previewRestore", "Preview & Restore latest"), restoreTooltip)))
                 {
                     if (latest != null)
-                        RestorePreviewWindow.Open(latest.id);
+                        OpenPreviewRestore(latest);
                 }
             }
             if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.open.backup.folder", "Open Backup Folder"), AvatarSmartBackup.Localization.L.T("tt.open.backup.folder", "Open the backups folder"))))
@@ -395,7 +420,7 @@ namespace AvatarSmartBackup
             if (latest != null)
             {
                 EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.latest.label", "Latest Version:"), EditorStyles.miniBoldLabel);
-                string desc = string.IsNullOrEmpty(latest.description) ? AvatarSmartBackup.Localization.L.T("ui.overview.noDescription", "(no description)") : latest.description;
+                string desc = SanitizeInlineLabel(latest.description, AvatarSmartBackup.Localization.L.T("ui.overview.noDescription", "(no description)"));
                 EditorGUILayout.LabelField($"# {latest.id}  {desc}", EditorStyles.miniLabel);
                 var created = ParseCreatedUtc(latest);
                 if (created != DateTime.MinValue)
@@ -474,9 +499,7 @@ namespace AvatarSmartBackup
                 EditorGUILayout.BeginHorizontal();
                 if (GUILayout.Button(new GUIContent(v.pinned ? "★" : "☆", v.pinned ? "Unpin" : "Pin"), GUILayout.Width(24))) pendingTogglePin = v.id;
                 Rect starRect = GUILayoutUtility.GetLastRect(); // rect of the star button
-                string title = $"#{v.id}  {(string.IsNullOrEmpty(v.description) ? "(no description)" : v.description)}";
-                if (v.incomplete) title += "  (writing...)";
-                if (latest != null && latest.id == v.id) title = "Latest • " + title;
+                string title = BuildVersionCardTitle(v, latest != null && latest.id == v.id);
                 EditorGUILayout.LabelField(title, isSelected ? _selectedTitleStyle : EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
                 Rect folderBtnRect = GUILayoutUtility.GetRect(20, 18, GUILayout.Width(20));
@@ -516,7 +539,7 @@ namespace AvatarSmartBackup
                         EditorGUILayout.EndHorizontal(); if (e.isKey && e.keyCode == KeyCode.Return) CommitRename(v);
                     }
                     EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button(new GUIContent("Restore", "Open preview and proceed to restore"), GUILayout.Height(22))) RestorePreviewWindow.Open(v.id);
+                    if (GUILayout.Button(new GUIContent("Restore", "Open preview and proceed to restore"), GUILayout.Height(22))) OpenPreviewRestore(v);
                     using (new EditorGUI.DisabledScope(v.pinned))
                     {
                         if (GUILayout.Button(new GUIContent("Delete", v.pinned ? "Pinned version protected" : "Delete this version"), GUILayout.Height(22), GUILayout.Width(70)))
@@ -529,7 +552,7 @@ namespace AvatarSmartBackup
                     EditorGUILayout.BeginHorizontal();
                     if (GUILayout.Button(new GUIContent("Show changes", "Open a summary of changed files"), GUILayout.Height(22)))
                     {
-                        ShowVersionDiffSummary(v);
+                        OpenPreviewRestore(v);
                     }
                     GUILayout.FlexibleSpace();
                     if (_settings.AdvancedMode)
@@ -572,7 +595,7 @@ namespace AvatarSmartBackup
                     }
                 }
                 if (e.type == EventType.MouseDown && e.button == 0 && cardRect.Contains(e.mousePosition))
-                { if (!starRect.Contains(e.mousePosition) && !folderBtnRect.Contains(e.mousePosition)) { double now = EditorApplication.timeSinceStartup; bool db = (_lastClickId == v.id) && (now - _lastClickTime < 0.35f); _lastClickId = v.id; _lastClickTime = now; _selectedVersionId = v.id; GUI.FocusControl(""); Repaint(); if (db) RestorePreviewWindow.Open(v.id); e.Use(); } }
+                { if (!starRect.Contains(e.mousePosition) && !folderBtnRect.Contains(e.mousePosition)) { double now = EditorApplication.timeSinceStartup; bool db = (_lastClickId == v.id) && (now - _lastClickTime < 0.35f); _lastClickId = v.id; _lastClickTime = now; _selectedVersionId = v.id; GUI.FocusControl(""); Repaint(); if (db) OpenPreviewRestore(v); e.Use(); } }
                 GUILayout.Space(4);
                 rowIndex++;
             }
@@ -637,6 +660,49 @@ namespace AvatarSmartBackup
             while (val > 1024 && u < units.Length - 1) { val /= 1024; u++; }
             return $"{val:0.0} {units[u]}";
         }
+
+        static string SanitizeInlineLabel(string value, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return fallback;
+
+            var sb = new StringBuilder(value.Length);
+            foreach (var ch in value)
+            {
+                if (ch == '\r' || ch == '\n')
+                {
+                    if (sb.Length > 0 && sb[sb.Length - 1] != ' ')
+                        sb.Append(' ');
+                    continue;
+                }
+                if (!char.IsControl(ch))
+                    sb.Append(ch);
+            }
+
+            var result = sb.ToString().Trim();
+            return string.IsNullOrEmpty(result) ? fallback : result;
+        }
+
+        static string BuildVersionCardTitle(VersionInfo version, bool isLatest)
+        {
+            if (version == null) return string.Empty;
+
+            string fallback = AvatarSmartBackup.Localization.L.T("ui.overview.noDescription", "(no description)");
+            string description = SanitizeInlineLabel(version.description, fallback);
+            string baseTitle = $"#{version.id}  {description}";
+
+            if (version.incomplete)
+                baseTitle += "  " + AvatarSmartBackup.Localization.L.T("ui.versions.status.writing", "(writing...)");
+
+            if (isLatest)
+            {
+                string latestLabel = AvatarSmartBackup.Localization.L.T("ui.versions.latestBadge", "Latest");
+                return $"{latestLabel} - {baseTitle}";
+            }
+
+            return baseTitle;
+        }
+
         DateTime ParseCreatedUtc(VersionInfo info)
         {
             if (info == null) return DateTime.MinValue;
@@ -729,36 +795,6 @@ namespace AvatarSmartBackup
                 .OrderByDescending(cs => cs.count)
                 .ThenBy(cs => cs.category)
                 .Select(cs => $"{cs.category}: {cs.count}"));
-        }
-
-        void ShowVersionDiffSummary(VersionInfo info)
-
-        {
-
-            if (info == null) return;
-
-            try
-
-            {
-
-                var meta = VersionRestoreService.LoadDeltaMetadata(info) ?? new VersionDeltaMetadata();
-
-                VersionChangesWindow.Open(info, meta);
-
-            }
-
-            catch (Exception ex)
-
-            {
-
-                Log.Warn("Version diff summary failed: " + ex.Message);
-
-                var message = string.Format(AvatarSmartBackup.Localization.L.T("vc.error.body", "Unable to read changes:\n{0}"), ex.Message);
-
-                EditorUtility.DisplayDialog(AvatarSmartBackup.Localization.L.T("vc.error.title", "Show changes"), message, "OK");
-
-            }
-
         }
 
 
@@ -868,46 +904,92 @@ namespace AvatarSmartBackup
         void DrawAdvancedSettings()
         {
             if (!_settings.AdvancedMode) return;
+
             EditorGUILayout.Space(10);
-            _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, "Advanced Settings");
+            _settings.showAdvanced = EditorGUILayout.Foldout(_settings.showAdvanced, AvatarSmartBackup.Localization.L.T("ui.advanced.settings", "Advanced Settings"));
             if (!_settings.showAdvanced) return;
-            // ZIP POLICY
-            if (_settings.AdvancedMode) // show snapshot policy only in advanced to declutter normal UX
+
+            _settings.EnsureVersioningDefaults();
+            _settings.SyncLegacyCheckpointInterval();
+
+            DrawVersioningPolicySection();
+            EditorGUILayout.Space(4f);
+            DrawPerformanceSection();
+            EditorGUILayout.Space(4f);
+            DrawScopeSection();
+            EditorGUILayout.Space(4f);
+            DrawDebugToolsSection();
+        }
+
+        void DrawVersioningPolicySection()
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.versioning.policy.title", "Versioning policy"), EditorStyles.boldLabel);
+
+            var policies = (VersioningPolicy[])Enum.GetValues(typeof(VersioningPolicy));
+            var labels = new[]
             {
-                EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Snapshot (Zip) Policy", EditorStyles.boldLabel);
-                if (GUILayout.Button(new GUIContent("?", "Legacy snapshot system – mainly for compressed archives."), GUILayout.Width(22)))
-                {
-                    EditorUtility.DisplayDialog("Snapshot Policy", "Snapshots are compressed .zip archives of the backup set. Regular users can rely on Versions instead.", "OK");
-                }
-                EditorGUILayout.EndHorizontal();
-                _settings.zipPolicy = (ZipPolicy)EditorGUILayout.EnumPopup(new GUIContent("Mode", "When to create zip snapshots."), _settings.zipPolicy);
-                using (new EditorGUI.DisabledScope(_settings.zipPolicy != ZipPolicy.Idle))
-                {
-                    _settings.idleDelaySeconds = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Idle delay (s)", "Seconds of inactivity before creating a zip when policy is Idle."), _settings.idleDelaySeconds), 1, 3600);
-                }
-                _settings.keepSnapshots = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Keep last snapshots", "How many .zip snapshots to keep in the Archive folder (1 disables snapshots)."), _settings.keepSnapshots), 1, 50);
-                _settings.zipFastest = EditorGUILayout.ToggleLeft(new GUIContent("Compression level: Fastest (quicker)", "Fastest is quicker but larger archives. Untick for Optimal (smaller, slower)."), _settings.zipFastest);
-                EditorGUILayout.EndVertical();
+                AvatarSmartBackup.Localization.L.T("ui.versioning.policy.option.balanced", "Automatic"),
+                AvatarSmartBackup.Localization.L.T("ui.versioning.policy.option.frequent", "Frequent"),
+                AvatarSmartBackup.Localization.L.T("ui.versioning.policy.option.manual", "Manual"),
+            };
+            int currentIndex = Array.IndexOf(policies, _settings.versioningPolicy);
+            if (currentIndex < 0) currentIndex = 0;
+
+            GUIContent presetLabel = AvatarSmartBackup.Localization.L.C("ui.versioning.policy.mode", "Preset", "ui.versioning.policy.mode.tooltip", "Choose how often checkpoints are forced.");
+            int newIndex = EditorGUILayout.Popup(presetLabel, currentIndex, labels);
+            if (newIndex != currentIndex && newIndex >= 0 && newIndex < policies.Length)
+            {
+                _settings.versioningPolicy = policies[newIndex];
             }
-            // PERFORMANCE
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Performance", EditorStyles.boldLabel);
-            _settings.autoThrottle = EditorGUILayout.ToggleLeft(new GUIContent("Auto throttle (recommended)", "Automatically caps IO speed to keep the editor responsive."), _settings.autoThrottle);
-            _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(new GUIContent("Max parallel threads", "Number of concurrent copy/hash tasks."), _settings.maxParallelThreads), 1, Math.Max(1, System.Environment.ProcessorCount));
-            _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(new GUIContent("Save open scenes before backup", "Saves scenes if dirty before backup. May block briefly."), _settings.saveScenesBeforeBackup);
-            if (_settings.AdvancedMode && _settings.lastMeasuredMBps > 0f)
-                EditorGUILayout.LabelField($"Measured throughput: {_settings.lastMeasuredMBps:F1} MB/s", EditorStyles.miniLabel);
-            // Benchmark button only in advanced (moved below) keeps UI simpler
-            EditorGUILayout.EndVertical();
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Versioning", EditorStyles.boldLabel);
-            _settings.forceFullCheckpointEveryN = Mathf.Max(0, EditorGUILayout.IntField(new GUIContent("Force checkpoint every N incrementals", "0 = automatic policy (heuristic)."), _settings.forceFullCheckpointEveryN));
-            EditorGUILayout.LabelField(_settings.forceFullCheckpointEveryN <= 0 ? "Automatic policy: creates checkpoints when needed." : $"Creates a full checkpoint after {_settings.forceFullCheckpointEveryN} incremental versions.", EditorStyles.miniLabel);
+
+            switch (_settings.versioningPolicy)
+            {
+                case VersioningPolicy.Frequent:
+                    EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.versioning.policy.frequent.help", "Favors frequent checkpoints after significant changes."), MessageType.Info);
+                    break;
+                case VersioningPolicy.Manual:
+                {
+                    int manual = Mathf.Clamp(_settings.manualCheckpointFrequency, 1, ManualCheckpointMax);
+                    manual = EditorGUILayout.IntSlider(AvatarSmartBackup.Localization.L.C("ui.versioning.policy.manual.label", "Checkpoint every (incremental versions)", "ui.versioning.policy.manual.tooltip", "Number of incremental versions before forcing a full checkpoint."), manual, 1, ManualCheckpointMax);
+                    _settings.manualCheckpointFrequency = manual;
+                    EditorGUILayout.HelpBox(string.Format(AvatarSmartBackup.Localization.L.T("ui.versioning.policy.manual.help", "Forces a full checkpoint after {0} incremental versions."), manual), MessageType.None);
+                    break;
+                }
+                default:
+                    EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.versioning.policy.balanced.help", "Automatic checkpoints based on project activity."), MessageType.Info);
+                    break;
+            }
+
             _settings.showRebuildTool = EditorGUILayout.ToggleLeft(new GUIContent("Show rebuild index tool", "Enable manual rebuild of the versions index from the Versions tab."), _settings.showRebuildTool);
+
+            _settings.EnsureVersioningDefaults();
+            _settings.SyncLegacyCheckpointInterval();
             EditorGUILayout.EndVertical();
-            // WHAT TO INCLUDE
+        }
+
+        void DrawPerformanceSection()
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.performance.title", "Performance"), EditorStyles.boldLabel);
+
+            _settings.autoThrottle = EditorGUILayout.ToggleLeft(AvatarSmartBackup.Localization.L.C("ui.performance.autoThrottle", "Auto throttle (recommended)", "ui.performance.autoThrottle.tt", "Automatically cap disk throughput to keep the editor responsive."), _settings.autoThrottle);
+
+            int maxThreads = Math.Max(1, Environment.ProcessorCount);
+            _settings.maxParallelThreads = Mathf.Clamp(EditorGUILayout.IntField(AvatarSmartBackup.Localization.L.C("ui.performance.threads", "Max parallel threads", "ui.performance.threads.tt", "Concurrent worker threads for hashing and copying."), _settings.maxParallelThreads), 1, maxThreads);
+
+            _settings.saveScenesBeforeBackup = EditorGUILayout.ToggleLeft(AvatarSmartBackup.Localization.L.C("ui.performance.saveScenes", "Save open scenes before backup", "ui.performance.saveScenes.tt", "Save dirty scenes before running a backup."), _settings.saveScenesBeforeBackup);
+
+            if (!_settings.autoThrottle)
+            {
+                EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.performance.autothrottle.off", "Auto throttle is disabled. Manual speed caps will be used if set."), MessageType.Info);
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
+        void DrawScopeSection()
+        {
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("What to include", EditorStyles.boldLabel);
             _settings.incVRCAssets = EditorGUILayout.ToggleLeft(new GUIContent("VRC Expressions (.asset)", "Common VRC expression assets and similarly named .asset files."), _settings.incVRCAssets);
@@ -929,16 +1011,15 @@ namespace AvatarSmartBackup
                 else
                 {
                     long v = EditorGUILayout.LongField(new GUIContent("Custom (KB)", "Custom max size in KB."), _settings.materialsMaxKB);
-                    v = Math.Max(10L, Math.Min(v, 100L * 1024L));
+                    v = Math.Max(128L, Math.Min(v, 1024L * 10L));
                     _settings.materialsMaxKB = v;
                 }
             }
-            _settings.incDlls = EditorGUILayout.ToggleLeft(new GUIContent("Plugin .dll in Assets (under size limit)", "Small .dll files under Assets/ (useful for simple plugins)."), _settings.incDlls);
+            _settings.incDlls = EditorGUILayout.ToggleLeft(new GUIContent("DLLs (.dll) under size limit", "Managed DLLs and native plugins."), _settings.incDlls);
             using (new EditorGUI.DisabledScope(!_settings.incDlls))
             {
-                string[] dNames = { "512 KB", "1 MB", "2 MB", "4 MB", "Custom" };
-                long[] dValues = { 512, 1024, 2048, 4096, -1 };
-                if (_settings.dllSizePresetIndex == dNames.Length - 1) { for (int i = 0; i < dValues.Length - 1; i++) if (_settings.dllsMaxKB == dValues[i]) { _settings.dllSizePresetIndex = i; break; } }
+                string[] dNames = { "256 KB", "512 KB", "1 MB", "2 MB", "4 MB", "Custom" };
+                long[] dValues = { 256, 512, 1024, 2048, 4096, -1 };
                 _settings.dllSizePresetIndex = EditorGUILayout.Popup(new GUIContent("DLL size limit", "Skip DLLs larger than this size."), _settings.dllSizePresetIndex, dNames);
                 int di = Mathf.Clamp(_settings.dllSizePresetIndex, 0, dNames.Length - 1);
                 if (di < dNames.Length - 1)
@@ -954,7 +1035,7 @@ namespace AvatarSmartBackup
                 }
             }
             EditorGUILayout.EndVertical();
-            // FOLDERS & EXTENSIONS
+
             EditorGUILayout.BeginVertical("box");
             EditorGUILayout.LabelField("Folders & Types", EditorStyles.boldLabel);
             bool filtersChanged = false;
@@ -974,39 +1055,87 @@ namespace AvatarSmartBackup
                 EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.filters.pending", "Filter changes pending. The next backup will create a full checkpoint to apply the new scope."), MessageType.Info);
             }
             EditorGUILayout.EndVertical();
+        }
+
+        void DrawDebugToolsSection()
+        {
             EditorGUILayout.BeginVertical("box");
-            _settings.debugMode = EditorGUILayout.ToggleLeft(new GUIContent("Diagnostics & utilities", "Enable additional tools (benchmark, detailed logs)."), _settings.debugMode);
-            if (_settings.debugMode)
+            _settings.showDebugTools = EditorGUILayout.Foldout(_settings.showDebugTools, AvatarSmartBackup.Localization.L.T("ui.debug.tools.title", "Debug tools"), true);
+            if (_settings.showDebugTools)
             {
-                EditorGUI.BeginChangeCheck();
-                bool useGlobal = !_settings.useProjectSettings;
-                bool newUseGlobal = EditorGUILayout.ToggleLeft(new GUIContent("Use global settings", "Use global settings instead of project-local ones."), useGlobal);
-                if (EditorGUI.EndChangeCheck())
+                EditorGUI.indentLevel++;
+                bool newDebug = EditorGUILayout.ToggleLeft(AvatarSmartBackup.Localization.L.C("ui.debug.tools.enable", "Enable debug tools", "ui.debug.tools.enable.tt", "Turn on diagnostics and manual overrides."), _settings.debugMode);
+                if (newDebug != _settings.debugMode)
                 {
-                    _settings.useProjectSettings = !newUseGlobal;
-                    BackupManager.SaveSettings(_settings);
-                    TimerService.InvalidateSettingsCache();
-                    _settings = BackupManager.LoadSettings();
+                    _settings.debugMode = newDebug;
+                    if (!_settings.debugMode)
+                        _settings.enableDebugLogging = false;
                 }
-                if (GUILayout.Button(new GUIContent("Re-run benchmark", "Measure disk throughput again."), GUILayout.Width(150))) _ = BackupManager.RunManualBenchmarkAsync(_settings);
-                EditorGUILayout.Space(6);
-                EditorGUILayout.LabelField("Anti-spam cooldowns", EditorStyles.boldLabel);
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(new GUIContent("Snapshot cooldown (s)", "Minimum seconds between manual snapshots."), GUILayout.Width(160));
-                _settings.manualSnapshotCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualSnapshotCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(new GUIContent("Benchmark cooldown (s)", "Minimum seconds between manual benchmark runs."), GUILayout.Width(160));
-                _settings.manualBenchmarkCooldownSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.manualBenchmarkCooldownSeconds, GUILayout.Width(60)), 1, 3600);
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(new GUIContent("Min backup interval (s)", "Minimum seconds between manual backup requests."), GUILayout.Width(160));
-                _settings.minManualBackupIntervalSeconds = Mathf.Clamp(EditorGUILayout.IntField(_settings.minManualBackupIntervalSeconds, GUILayout.Width(60)), 1, 3600);
-                EditorGUILayout.EndHorizontal();
-                _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(new GUIContent("Detailed file logging", "Enable detailed logging to file for troubleshooting."), _settings.enableDebugLogging);
+
+                if (_settings.debugMode)
+                {
+                    bool useGlobal = !_settings.useProjectSettings;
+                    bool newUseGlobal = EditorGUILayout.ToggleLeft(AvatarSmartBackup.Localization.L.C("ui.debug.tools.global", "Use global settings", "ui.debug.tools.global.tt", "Share this configuration across projects."), useGlobal);
+                    if (newUseGlobal != useGlobal)
+                    {
+                        _settings.useProjectSettings = !newUseGlobal;
+                        BackupManager.SaveSettings(_settings);
+                        TimerService.InvalidateSettingsCache();
+                        _settings = BackupManager.LoadSettings();
+                    }
+
+                    if (_settings.lastMeasuredMBps > 0f)
+                    {
+                        EditorGUILayout.LabelField(string.Format(AvatarSmartBackup.Localization.L.T("ui.debug.tools.throughput", "Measured throughput: {0:0.0} MB/s"), _settings.lastMeasuredMBps), EditorStyles.miniLabel);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.debug.tools.throughput.none", "Benchmark has not been run yet."), MessageType.None);
+                    }
+
+                    using (new EditorGUI.DisabledScope(BackupManager.IsBusy))
+                    {
+                        if (GUILayout.Button(AvatarSmartBackup.Localization.L.C("ui.debug.tools.benchmark", "Run benchmark again"), GUILayout.Width(170)))
+                        {
+                            _ = BackupManager.RunManualBenchmarkAsync(_settings);
+                        }
+                    }
+                    if (BackupManager.IsBusy)
+                    {
+                        EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.debug.tools.benchmark.busy", "Benchmark unavailable while a backup is running."), MessageType.Info);
+                    }
+
+                    EditorGUILayout.Space(4);
+                    EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.debug.tools.cooldowns", "Manual cooldowns"), EditorStyles.boldLabel);
+
+                    DrawCooldownRow("ui.debug.tools.snapshot.cooldown", "Snapshot cooldown (s)", "ui.debug.tools.snapshot.cooldown.tt", "Minimum seconds between manual snapshots.", ref _settings.manualSnapshotCooldownSeconds);
+                    DrawCooldownRow("ui.debug.tools.benchmark.cooldown", "Benchmark cooldown (s)", "ui.debug.tools.benchmark.cooldown.tt", "Minimum seconds between manual benchmark runs.", ref _settings.manualBenchmarkCooldownSeconds);
+                    DrawCooldownRow("ui.debug.tools.backup.cooldown", "Min backup interval (s)", "ui.debug.tools.backup.cooldown.tt", "Minimum seconds between manual backup requests.", ref _settings.minManualBackupIntervalSeconds);
+
+                    _settings.enableDebugLogging = EditorGUILayout.ToggleLeft(AvatarSmartBackup.Localization.L.C("ui.debug.tools.logs", "Detailed file logging", "ui.debug.tools.logs.tt", "Write verbose file logs for troubleshooting."), _settings.enableDebugLogging);
+                    EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.debug.tools.snapshots.info", "Zip snapshots are managed automatically. Legacy settings remain available for compatibility."), MessageType.None);
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox(AvatarSmartBackup.Localization.L.T("ui.debug.tools.disabled", "Enable to access diagnostics and manual overrides."), MessageType.None);
+                }
+
+                EditorGUI.indentLevel--;
             }
             EditorGUILayout.EndVertical();
         }
+
+        void DrawCooldownRow(string labelKey, string labelFallback, string tooltipKey, string tooltipFallback, ref int value)
+        {
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.C(labelKey, labelFallback, tooltipKey, tooltipFallback), GUILayout.Width(200));
+            value = Mathf.Clamp(EditorGUILayout.IntField(value, GUILayout.Width(60)), 1, 3600);
+            EditorGUILayout.EndHorizontal();
+        }
+
+
+
+
         void DrawTrackedSelectionSection()
         {
             if (_settings.trackedRoots == null)
