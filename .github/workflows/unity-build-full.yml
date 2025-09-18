@@ -132,6 +132,100 @@ jobs:
         run: |
           set -e
           
+          # Scrivi lo script da eseguire nel container per evitare problemi di quoting
+          cat > _ci_build.sh <<'BASH'
+          set -e
+          export DOTNET_CLI_TELEMETRY_OPTOUT=1
+          export DOTNET_NOLOGO=1
+
+          echo "=== Unity Installation Check ==="
+          for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
+            echo "Trying: $d"
+            ls -la "$d" 2>/dev/null | head -20 || true
+          done
+          echo "================================"
+
+          # dotnet SDK (usa cache montata in /root/.dotnet)
+          if ! command -v dotnet >/dev/null 2>&1; then
+            curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+            chmod +x dotnet-install.sh
+            ./dotnet-install.sh --channel 8.0 --install-dir /root/.dotnet
+            export PATH=/root/.dotnet:$PATH
+          else
+            export PATH=/root/.dotnet:$PATH
+          fi
+          dotnet --info
+
+          PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
+
+          # Auto-detect UNITY_MANAGED
+          UNITY_MANAGED=""
+          for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
+            if [ -d "$d" ]; then UNITY_MANAGED="$d"; break; fi
+          done
+          if [ -z "$UNITY_MANAGED" ]; then
+            CAND=$(find / -maxdepth 5 -type f -name "UnityEditor.dll" 2>/dev/null | head -n 1 || true)
+            if [ -n "$CAND" ]; then UNITY_MANAGED="$(dirname "$CAND")"; fi
+          fi
+          [ -n "$UNITY_MANAGED" ] && [ -d "$UNITY_MANAGED" ] || { echo "ERROR: Managed folder not found"; exit 1; }
+          export UNITY_MANAGED
+          echo "UNITY_MANAGED set to: $UNITY_MANAGED"
+
+          # Verify needed DLLs
+          [ -f "$UNITY_MANAGED/UnityEditor.dll" ] || { echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"; exit 1; }
+          if [ -f "$UNITY_MANAGED/UnityEngine.dll" ]; then
+            echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine.dll"
+          elif [ -f "$UNITY_MANAGED/UnityEngine/UnityEngine.dll" ]; then
+            echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine/UnityEngine.dll"
+          else
+            echo "ERROR: UnityEngine.dll not found under $UNITY_MANAGED"; exit 1
+          fi
+
+          # Build with deterministic OUTPUT
+          dotnet restore "$PROJ"
+          echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
+          OUTDIR="build/core"
+          mkdir -p "$OUTDIR"
+          dotnet build "$PROJ" -c Release \
+            -p:UNITY_MANAGED="$UNITY_MANAGED" \
+            -p:WarningsAsErrors=false \
+            -p:AppendTargetFrameworkToOutputPath=false \
+            -o "$OUTDIR"
+
+          DLL="$OUTDIR/AvatarSmartBackups.Core.dll"
+          if [ ! -f "$DLL" ]; then
+            echo "ERROR: Expected DLL not found at $DLL"
+            echo "Listing DLLs under $OUTDIR for debug:"
+            find "$OUTDIR" -type f -name "*.dll" -exec ls -la {} \; 2>/dev/null || true
+            exit 1
+          fi
+          echo "Using built DLL: $DLL"
+
+          # Prepare Editor and copy DLL
+          rm -rf Editor || true
+          mkdir -p Editor
+          cat > Editor/AvatarSmartBackups.Editor.asmdef <<EOF
+          {
+            "name": "AvatarSmartBackups.Editor",
+            "references": [],
+            "includePlatforms": ["Editor"],
+            "excludePlatforms": [],
+            "allowUnsafeCode": false,
+            "overrideReferences": false,
+            "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
+            "autoReferenced": true,
+            "defineConstraints": [],
+            "versionDefines": [],
+            "noEngineReferences": false
+          }
+          EOF
+          cp -f "$DLL" "Editor/AvatarSmartBackups.Core.dll"
+          echo "Editor folder content after copy (inside container):"
+          ls -la Editor
+          BASH
+
+          chmod +x _ci_build.sh
+
           # Esegui il container con i mount corretti (immagine già caricata dalla cache)
           docker run --rm \
             -v ${{ github.workspace }}:/workspace \
@@ -139,107 +233,7 @@ jobs:
             -v ${{ runner.temp }}/dotnet-cache:/root/.dotnet \
             -w /workspace \
             ${{ env.UNITY_IMAGE }} \
-            bash -c '
-              set -e
-              export DOTNET_CLI_TELEMETRY_OPTOUT=1
-              export DOTNET_NOLOGO=1
-
-              # Verifica struttura Unity nell immagine
-              echo "=== Unity Installation Check ==="
-              for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
-                echo "Trying: $d"
-                ls -la "$d" 2>/dev/null | head -20 || true
-              done
-              echo "================================"
-
-              # dotnet SDK (usa cache montata in /root/.dotnet)
-              if ! command -v dotnet >/dev/null 2>&1; then
-                curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-                chmod +x dotnet-install.sh
-                ./dotnet-install.sh --channel 8.0 --install-dir /root/.dotnet
-                export PATH=/root/.dotnet:$PATH
-              else
-                export PATH=/root/.dotnet:$PATH
-              fi
-              dotnet --info
-
-              # >>> aggiorna se il .csproj cambia percorso <<<
-              PROJ="src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj"
-
-              # ---- AUTO-DETECT UNITY_MANAGED ----
-              UNITY_MANAGED=""
-              for d in /unity/Managed /opt/unity/Editor/Data/Managed; do
-                if [ -d "$d" ]; then UNITY_MANAGED="$d"; break; fi
-              done
-              if [ -z "$UNITY_MANAGED" ]; then
-                CAND=$(find / -maxdepth 5 -type f -name "UnityEditor.dll" 2>/dev/null | head -n 1 || true)
-                if [ -n "$CAND" ]; then UNITY_MANAGED="$(dirname "$CAND")"; fi
-              fi
-              [ -n "$UNITY_MANAGED" ] && [ -d "$UNITY_MANAGED" ] || { echo "ERROR: Managed folder not found"; exit 1; }
-
-              export UNITY_MANAGED
-              echo "UNITY_MANAGED set to: $UNITY_MANAGED"
-
-              # ---- Verifica DLL necessarie ----
-              [ -f "$UNITY_MANAGED/UnityEditor.dll" ] || { echo "ERROR: UnityEditor.dll not found in $UNITY_MANAGED"; exit 1; }
-              if [ -f "$UNITY_MANAGED/UnityEngine.dll" ]; then
-                echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine.dll"
-              elif [ -f "$UNITY_MANAGED/UnityEngine/UnityEngine.dll" ]; then
-                echo "Found UnityEngine at $UNITY_MANAGED/UnityEngine/UnityEngine.dll"
-              else
-                echo "ERROR: UnityEngine.dll not found under $UNITY_MANAGED"
-                exit 1
-              fi
-
-              # ---- Build ----
-              dotnet restore "$PROJ"
-              echo "Building with UNITY_MANAGED=$UNITY_MANAGED"
-              # Output deterministico per evitare ricerche successive
-              OUTDIR="build/core"
-              mkdir -p "$OUTDIR"
-              dotnet build "$PROJ" -c Release \
-                -p:UNITY_MANAGED="$UNITY_MANAGED" \
-                -p:WarningsAsErrors=false \
-                -p:AppendTargetFrameworkToOutputPath=false \
-                -o "$OUTDIR"
-
-              # ---- Verifica la DLL prodotta nella cartella deterministica ----
-              DLL="$OUTDIR/AvatarSmartBackups.Core.dll"
-              if [ ! -f "$DLL" ]; then
-                echo "ERROR: Expected DLL not found at $DLL"
-                echo "Listing DLLs under $OUTDIR for debug:"
-                find "$OUTDIR" -type f -name "*.dll" -exec ls -la {} \; 2>/dev/null || true
-                exit 1
-              fi
-              echo "Using built DLL: $DLL"
-
-              # ---- Prepara Editor/ e copia la DLL con nome fisso ----
-              rm -rf Editor || true
-              mkdir -p Editor
-
-              # (Semplifica l'here-doc per evitare problemi di quote in YAML)
-              cat > Editor/AvatarSmartBackups.Editor.asmdef <<EOF
-              {
-                "name": "AvatarSmartBackups.Editor",
-                "references": [],
-                "includePlatforms": ["Editor"],
-                "excludePlatforms": [],
-                "allowUnsafeCode": false,
-                "overrideReferences": false,
-                "precompiledReferences": ["AvatarSmartBackups.Core.dll"],
-                "autoReferenced": true,
-                "defineConstraints": [],
-                "versionDefines": [],
-                "noEngineReferences": false
-              }
-              EOF
-
-              # copia la DLL (niente install -m)
-              cp -f "$DLL" "Editor/AvatarSmartBackups.Core.dll"
-
-              echo "Editor folder content after copy (inside container):"
-              ls -la Editor
-            '
+            bash -eo pipefail /workspace/_ci_build.sh
 
       - id: pkgzip
         name: Create VPM ZIP (package.json + Editor/*)
@@ -264,6 +258,11 @@ jobs:
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: artifact/*.zip
+
+      - name: Cleanup temp build script
+        if: always()
+        run: |
+          rm -f _ci_build.sh || true
 
   publish:
     name: Publish Release & Update listing
