@@ -30,14 +30,22 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Build Core (Release) in UnityCI container
+        uses: addnab/docker-run-action@v3
         with:
-          dotnet-version: '8.0.x'
-      - name: Restore Core
-        run: dotnet restore src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj
-      - name: Build Core (Release)
-        run: dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release -p:ContinuousIntegrationBuild=true
+          image: unityci/editor:2022.3.22f1-base-3.0
+          options: -v ${{ github.workspace }}:/workspace -w /workspace
+          run: |
+            set -e
+            export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
+            # Install dotnet SDK locally for this container session
+            curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
+            chmod +x dotnet-install.sh
+            ./dotnet-install.sh --channel 8.0
+            export PATH=$HOME/.dotnet:$PATH
+            dotnet --info
+            dotnet restore src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj
+            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release -p:ContinuousIntegrationBuild=true
       - name: Upload Core DLL artifact
         uses: actions/upload-artifact@v4
         with:

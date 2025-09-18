@@ -17,10 +17,10 @@
 
   <ItemGroup>
     <Reference Include="UnityEditor">
-      <HintPath>C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed\UnityEditor.dll</HintPath>
+      <HintPath>$(UNITY_MANAGED)\UnityEditor.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine">
-      <HintPath>C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed\UnityEngine.dll</HintPath>
+      <HintPath>$(UNITY_MANAGED)\UnityEngine.dll</HintPath>
     </Reference>
     <Reference Include="System.IO.Compression" />
   </ItemGroup>
@@ -31,5 +31,10 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
+
+  <!-- Fallback Windows: se UNITY_MANAGED non è impostata, usa percorso standard di Unity Hub 2022.3.22f1 -->
+  <PropertyGroup Condition=" '$(UNITY_MANAGED)' == '' and '$(OS)' == 'Windows_NT' ">
+    <UNITY_MANAGED>C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed</UNITY_MANAGED>
+  </PropertyGroup>
 
 </Project>

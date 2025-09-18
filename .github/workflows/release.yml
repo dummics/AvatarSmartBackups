@@ -63,13 +63,22 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Build Core DLL
-        run: |
-          echo "=== File .cs trovati in Editor ==="
-          find Editor -name "*.cs" | wc -l
-          find Editor -name "*.cs" | head -10
-          echo "=================================="
-          dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
+      - name: Install zip (Ubuntu)
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Build Core DLL in UnityCI container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: unityci/editor:2022.3.22f1-base-3.0
+          options: -v ${{ github.workspace }}:/workspace -w /workspace
+          run: |
+            echo "=== File .cs trovati in Editor ==="
+            find Editor -name "*.cs" | wc -l
+            find Editor -name "*.cs" | head -10
+            echo "=================================="
+            export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
+            dotnet --info || true
+            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release
 
       - name: Integrate DLL in package (clean Editor/ and inject asmdef that references DLL)
         shell: bash
