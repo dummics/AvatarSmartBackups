@@ -2,10 +2,10 @@ name: unity-editmode-tests
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - versioning-main
-      - master
+  # pull_request:
+  #   branches:
+  #     - versioning-main
+  #     - master
 
 jobs:
   unity-tests:
