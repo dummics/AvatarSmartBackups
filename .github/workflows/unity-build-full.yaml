@@ -1,5 +1,5 @@
-name: Avatar Smart Backup Release (Orchestrator)
-run-name: Release ${{ github.ref_name }} - Avatar Smart Backup
+name: Avatar Smart Backup Release 
+run-name: Release version ${{ github.ref_name }} - Avatar Smart Backup
 
 on:
   workflow_dispatch: {}

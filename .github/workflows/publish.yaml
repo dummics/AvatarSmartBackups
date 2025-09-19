@@ -106,9 +106,12 @@ jobs:
           # Read version and name from artifact zip (con debug)
           mkdir -p tmp && cd tmp
           echo "=== DEBUG: Estrazione package.json per listing ==="
+          echo "Working directory: $(pwd)"
+          echo "Cercando artifact in: ${{ github.workspace }}/artifact/"
+          ls -la "${{ github.workspace }}/artifact/" || echo "Directory artifact non trovata"
           # Assicurati che il globbing funzioni
           shopt -s nullglob
-          for z in ../artifact/*.zip; do 
+          for z in "${{ github.workspace }}"/artifact/*.zip; do 
             if [ -f "$z" ]; then
               echo "Processing ZIP: $z"
               unzip -o "$z" package.json >/dev/null 2>&1 || echo "Failed to extract package.json from $z"
@@ -117,7 +120,7 @@ jobs:
                 break
               fi
             else
-              echo "No ZIP files found in ../artifact/"
+              echo "No ZIP files found in ${{ github.workspace }}/artifact/"
             fi
           done
           
@@ -138,30 +141,48 @@ jobs:
 
           [ -f source.json ] || echo '{"packages":[]}' > source.json
 
-          SAN="source.sanitized.json"
-          if ! jq '.' source.json >/dev/null 2>&1; then
-            perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
-          else
-            cp source.json "$SAN"
-          fi
+          echo "=== DEBUG: source.json prima dell'aggiornamento ==="
+          cat source.json | jq '.'
 
+          # Aggiorna source.json in modo più robusto
           jq --arg name "$NAME" --arg url "$URL" --arg now "$NOW" '
-            (.packages //= [])
-            | (.packages |= map(select((.name // "") != "")))
-            | if (.packages | map(.name) | index($name)) != null then
-                (.packages |= map(
-                  if .name == $name then
-                    .updatedAt = $now
-                    | (.releases //= [])
-                    | .releases += [$url]
-                    | .releases |= unique
-                  else . end))
-              else
-                (.packages += [{name: $name, updatedAt: $now, releases: [$url]}])
-              end
-          ' "$SAN" > source.tmp && mv source.tmp source.json
+            # Assicurati che packages esista
+            if .packages == null then .packages = [] else . end
+            |
+            # Rimuovi eventuali pacchetti con nome vuoto
+            .packages |= map(select(.name != null and .name != ""))
+            |
+            # Trova il pacchetto esistente o creane uno nuovo
+            if (.packages | map(.name) | index($name)) != null then
+              # Pacchetto esistente: aggiorna updatedAt e aggiungi release
+              .packages |= map(
+                if .name == $name then
+                  .updatedAt = $now
+                  | if .releases == null then .releases = [] else . end
+                  | .releases += [$url]
+                  | .releases |= unique
+                else 
+                  .
+                end
+              )
+            else
+              # Nuovo pacchetto: aggiungilo
+              .packages += [{
+                name: $name,
+                updatedAt: $now,
+                releases: [$url]
+              }]
+            end
+          ' source.json > source.tmp && mv source.tmp source.json
 
-          jq '.' source.json >/dev/null
+          echo "=== DEBUG: source.json dopo l'aggiornamento ==="
+          cat source.json | jq '.'
+
+          # Verifica che il JSON sia valido
+          if ! jq '.' source.json >/dev/null 2>&1; then
+            echo "ERROR: source.json non è un JSON valido!"
+            exit 1
+          fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
