@@ -21,13 +21,13 @@ env:
 jobs:
   prepare:
     name: Prepare
-    uses: ./.github/workflows/steps/prepare.yaml
+    uses: ./.github/workflows/prepare.yaml
     secrets: inherit
 
   build:
     name: Build (Windows net48)
     needs: prepare
-    uses: ./.github/workflows/steps/build.yaml
+    uses: ./.github/workflows/build.yaml
     with:
       project: ./YourSolutionOrCsproj.sln   # <— metti qui la tua .sln o .csproj
       configuration: Release
@@ -36,5 +36,5 @@ jobs:
   publish:
     name: Publish
     needs: [build, prepare]
-    uses: ./.github/workflows/steps/publish.yaml
+    uses: ./.github/workflows/publish.yaml
     secrets: inherit
