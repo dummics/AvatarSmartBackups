@@ -208,7 +208,7 @@ namespace AvatarSmartBackup
             return changed;
         }
 
-        public bool CreateVersion(string description, string currentBackupPath, BackupSettings settings = null, bool? forceCheckpoint = null)
+        public bool CreateVersion(string description, string currentBackupPath, BackupSettings? settings = null, bool? forceCheckpoint = null)
         {
             try
             {
@@ -234,7 +234,7 @@ namespace AvatarSmartBackup
 
                 var index = LoadIndex();
                 var latest = GetLatestVersion(index);
-                BackupManifest previousManifest = null;
+                BackupManifest? previousManifest = null;
                 if (latest != null)
                     previousManifest = LoadManifestForVersion(latest.id);
 
@@ -325,10 +325,10 @@ namespace AvatarSmartBackup
             }
         }
 
-        private VersionInfo GetLatestVersion(VersionIndex index)
+        private VersionInfo? GetLatestVersion(VersionIndex index)
         {
             if (index?.versions == null || index.versions.Count == 0) return null;
-            VersionInfo latest = null;
+            VersionInfo? latest = null;
             foreach (var v in index.versions)
             {
                 if (latest == null || v.id > latest.id)
@@ -337,7 +337,7 @@ namespace AvatarSmartBackup
             return latest;
         }
 
-        private BackupManifest LoadManifestForVersion(int versionId)
+        private BackupManifest? LoadManifestForVersion(int versionId)
         {
             try
             {
@@ -355,7 +355,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        private static bool DetermineIfCheckpoint(VersionInfo latest, BackupSettings settings, bool? forceCheckpoint, ManifestDiff diff)
+        private static bool DetermineIfCheckpoint(VersionInfo? latest, BackupSettings? settings, bool? forceCheckpoint, ManifestDiff? diff)
         {
             if (forceCheckpoint.HasValue)
                 return forceCheckpoint.Value;
@@ -373,7 +373,7 @@ namespace AvatarSmartBackup
             if (configured > 0 && latest.incrementalDepth >= configured - 1)
                 return true;
 
-            if (latest.fileCount > 0)
+            if (latest.fileCount > 0 && diff != null)
             {
                 int totalChanges = diff.Added.Count + diff.Modified.Count + diff.Removed.Count;
                 if (totalChanges >= Math.Max(10, latest.fileCount / 2))
@@ -383,7 +383,7 @@ namespace AvatarSmartBackup
             return false;
         }
 
-        private static int ResolveCheckpointId(VersionInfo latest)
+        private static int ResolveCheckpointId(VersionInfo? latest)
         {
             if (latest == null) return 0;
             if (latest.isCheckpoint) return latest.id;
@@ -405,7 +405,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        private static void CopyDeltaFiles(string sourceRoot, string versionRoot, ManifestDiff diff)
+        private static void CopyDeltaFiles(string sourceRoot, string versionRoot, ManifestDiff? diff)
         {
             if (diff == null) return;
             string deltaRoot = Path.Combine(versionRoot, "delta");
@@ -427,7 +427,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        private static ManifestDiff ComputeDiff(BackupManifest previous, BackupManifest current)
+        private static ManifestDiff ComputeDiff(BackupManifest? previous, BackupManifest? current)
         {
             var diff = new ManifestDiff();
             if (current?.entries == null || current.entries.Count == 0)
@@ -487,7 +487,7 @@ namespace AvatarSmartBackup
             return diff;
         }
 
-        private static bool HasChanged(ManifestEntry current, ManifestEntry previous)
+        private static bool HasChanged(ManifestEntry? current, ManifestEntry? previous)
         {
             if (current == null || previous == null) return true;
             if (!string.IsNullOrEmpty(current.md5) && !string.IsNullOrEmpty(previous.md5))
@@ -501,7 +501,7 @@ namespace AvatarSmartBackup
             return false;
         }
 
-        private static VersionDeltaMetadata BuildDeltaMetadata(ManifestDiff diff, int versionId, bool isCheckpoint, int parentId, int checkpointId)
+        private static VersionDeltaMetadata BuildDeltaMetadata(ManifestDiff? diff, int versionId, bool isCheckpoint, int parentId, int checkpointId)
         {
             var metadata = new VersionDeltaMetadata
             {
@@ -535,19 +535,27 @@ namespace AvatarSmartBackup
                     categoryMap[category] = (agg.count + 1, agg.bytes + Math.Max(0, entry.size));
             }
 
-            foreach (var entry in diff.Added) AddChange(entry, true);
-            foreach (var entry in diff.Modified) AddChange(entry, false);
-
-            long removedBytes = 0;
-            foreach (var removed in diff.Removed)
+            if (diff != null)
             {
-                if (removed == null || string.IsNullOrEmpty(removed.relPath)) continue;
-                metadata.removedEntries.Add(removed.relPath);
-                removedBytes += Math.Max(0, removed.size);
+                foreach (var entry in diff.Added) AddChange(entry, true);
+                foreach (var entry in diff.Modified) AddChange(entry, false);
+
+                long removedBytes = 0;
+                foreach (var removed in diff.Removed)
+                {
+                    if (removed == null || string.IsNullOrEmpty(removed.relPath)) continue;
+                    metadata.removedEntries.Add(removed.relPath);
+                    removedBytes += Math.Max(0, removed.size);
+                }
+
+                metadata.removedBytes = removedBytes;
             }
 
+            if (diff == null)
+            {
+                metadata.removedBytes = 0;
+            }
             metadata.changedBytes = changedBytes;
-            metadata.removedBytes = removedBytes;
             metadata.changedFileCount = metadata.changedEntries.Count;
             metadata.removedFileCount = metadata.removedEntries.Count;
 
@@ -644,7 +652,7 @@ namespace AvatarSmartBackup
             return index.versions.OrderByDescending(v => ParseCreated(v)).ToList();
         }
 
-        public VersionInfo GetVersion(int id)
+        public VersionInfo? GetVersion(int id)
         {
             var index = LoadIndex();
             return index.versions.FirstOrDefault(v => v.id == id);
@@ -713,7 +721,7 @@ namespace AvatarSmartBackup
             return index.versions.Count;
         }
 
-        public void MarkVersionCorrupt(int id, bool markIncomplete, string reason = null)
+        public void MarkVersionCorrupt(int id, bool markIncomplete, string? reason = null)
         {
             try
             {
