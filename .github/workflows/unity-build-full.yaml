@@ -28,7 +28,7 @@ env:
 jobs:
   prepare:
     name: Prepare (read version & pkg name)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       version: ${{ steps.meta.outputs.version }}
       pkgname: ${{ steps.meta.outputs.name }}
@@ -68,7 +68,7 @@ jobs:
 
   build:
     name: Build DLL & Package ZIP
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: prepare
     outputs:
       zipfile: ${{ steps.pkgzip.outputs.zip }}
@@ -252,7 +252,7 @@ jobs:
 
   publish:
     name: Publish Release & Update listing
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [build, prepare]
     steps:
       - name: Download ZIP artifact
