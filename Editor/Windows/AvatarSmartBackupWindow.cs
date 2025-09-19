@@ -19,19 +19,19 @@ namespace AvatarSmartBackup
     {
         Vector2 _scroll;
         Vector2 _versionsScroll;
-        BackupSettings _settings;
+        BackupSettings _settings = new BackupSettings();
         // Include/Exclude UI temp fields
         string _newIncludePattern = string.Empty;
         string _newExcludePattern = string.Empty;
         string _includePrefix = string.Empty;
         string _excludePrefix = string.Empty;
-        UnityEngine.Object _includeFolderObj;
-        UnityEngine.Object _excludeFolderObj;
+        UnityEngine.Object? _includeFolderObj;
+        UnityEngine.Object? _excludeFolderObj;
         // Signature caching for gating manual version creation
         struct BackupSignature { public long size; public int count; }
         BackupSignature? _cachedCurrentSig; double _cachedCurrentSigTime;
-        GUIStyle _selectedTitleStyle; // enlarged style for selected version title
-        List<VersionInfo> _cachedVersions; // cached index
+        GUIStyle? _selectedTitleStyle; // enlarged style for selected version title
+        List<VersionInfo>? _cachedVersions; // cached index
         int _renamingId = -1; string _renameBuffer = string.Empty; // rename state
         int _selectedVersionId = -1; // selected version id (default latest)
         // Doppio click tracking per apertura rapida preview
@@ -44,8 +44,8 @@ namespace AvatarSmartBackup
         static readonly Color BadgeColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
         const float BadgeWidth = 128f;
         const int ManualCheckpointMax = 12;
-        static GUIStyle _badgeStyle;
-        static Texture2D _texExplorer; static bool _texTried;
+        static GUIStyle? _badgeStyle;
+        static Texture2D? _texExplorer; static bool _texTried;
         static bool _forceBackupTabOnOpen;
         void EnsureTextures()
         {
@@ -94,8 +94,12 @@ namespace AvatarSmartBackup
         }
         void OnEnable()
         {
-            _settings = BackupManager.LoadSettings();
-            if (_forceBackupTabOnOpen && _settings != null)
+            var loaded = BackupManager.LoadSettings();
+            if (loaded != null)
+            {
+                _settings = loaded;
+            }
+            if (_forceBackupTabOnOpen)
             {
                 _settings._activeTab = 0;
                 _settings._uiTabInitialized = true;
@@ -181,8 +185,9 @@ namespace AvatarSmartBackup
         }
         void RunOnboardingIfNeeded()
         {
-            if (_settings == null)
-                _settings = BackupManager.LoadSettings();
+            var loaded = BackupManager.LoadSettings();
+            if (loaded != null)
+                _settings = loaded;
 
             if (_settings.onboardingCompleted)
                 return;
@@ -510,8 +515,7 @@ namespace AvatarSmartBackup
                 // Hard reset di sicurezza per evitare stato disabled ereditato
                 GUI.enabled = true;
                 bool isSelected = v.id == _selectedVersionId;
-                if (_selectedTitleStyle == null)
-                    _selectedTitleStyle = new GUIStyle(EditorStyles.boldLabel) { fontSize = EditorStyles.boldLabel.fontSize + 1 };
+                var selectedTitleStyle = _selectedTitleStyle ??= new GUIStyle(EditorStyles.boldLabel) { fontSize = EditorStyles.boldLabel.fontSize + 1 };
                 EnsureTextures();
                 // Begin card content
                 EditorGUILayout.BeginVertical(GUI.skin.box);
@@ -519,7 +523,7 @@ namespace AvatarSmartBackup
                 if (GUILayout.Button(new GUIContent(v.pinned ? "★" : "☆", v.pinned ? "Unpin" : "Pin"), GUILayout.Width(24))) pendingTogglePin = v.id;
                 Rect starRect = GUILayoutUtility.GetLastRect(); // rect of the star button
                 string title = BuildVersionCardTitle(v, latest != null && latest.id == v.id);
-                EditorGUILayout.LabelField(title, isSelected ? _selectedTitleStyle : EditorStyles.boldLabel);
+                EditorGUILayout.LabelField(title, isSelected ? selectedTitleStyle : EditorStyles.boldLabel);
                 GUILayout.FlexibleSpace();
                 Rect folderBtnRect = GUILayoutUtility.GetRect(20, 18, GUILayout.Width(20));
                 if (_texExplorer != null && Event.current.type == EventType.Repaint)
@@ -767,11 +771,8 @@ namespace AvatarSmartBackup
         {
             get
             {
-                if (_badgeStyle == null)
-                {
-                    _badgeStyle = new GUIStyle(EditorStyles.miniBoldLabel) { alignment = TextAnchor.MiddleCenter };
-                }
-                return _badgeStyle;
+                var style = _badgeStyle ??= new GUIStyle(EditorStyles.miniBoldLabel) { alignment = TextAnchor.MiddleCenter };
+                return style;
             }
         }
 
@@ -1201,7 +1202,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        static bool DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object folderObj)
+        static bool DrawIncludeExcludeSection(string title, List<string> list, ref string newExt, ref string newPrefix, ref UnityEngine.Object? folderObj)
         {
             bool changed = false;
             EditorGUILayout.BeginHorizontal();
@@ -1225,20 +1226,23 @@ namespace AvatarSmartBackup
             {
                 if (GUILayout.Button("Add", GUILayout.Width(60)))
                 {
-                    string p = AssetDatabase.GetAssetPath(folderObj);
-                    if (string.IsNullOrEmpty(p) || !AssetDatabase.IsValidFolder(p))
+                    if (folderObj != null)
                     {
-                        EditorUtility.DisplayDialog("Not a folder", "Please select a folder inside the Project window.", "OK");
-                    }
-                    else
-                    {
-                        if (!p.EndsWith("/")) p += "/";
-                        if (!list.Contains(p))
+                        string p = AssetDatabase.GetAssetPath(folderObj);
+                        if (string.IsNullOrEmpty(p) || !AssetDatabase.IsValidFolder(p))
                         {
-                            list.Add(p);
-                            changed = true;
+                            EditorUtility.DisplayDialog("Not a folder", "Please select a folder inside the Project window.", "OK");
                         }
-                        folderObj = null;
+                        else
+                        {
+                            if (!p.EndsWith("/")) p += "/";
+                            if (!list.Contains(p))
+                            {
+                                list.Add(p);
+                                changed = true;
+                            }
+                            folderObj = null;
+                        }
                     }
                 }
             }

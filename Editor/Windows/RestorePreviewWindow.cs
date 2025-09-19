@@ -25,7 +25,7 @@ namespace AvatarSmartBackup
     bool _backupBefore = true;
     bool _hideMeta = true;
     // Easy/Advanced mode bridge
-    BackupSettings _settings;
+    BackupSettings? _settings;
     bool _easyMode = false;
     bool _requireModeChoice = false;
     bool _easyBannerDismissed = false;
@@ -47,19 +47,19 @@ namespace AvatarSmartBackup
     List<CategoryGroup> _categoriesOrdered = new List<CategoryGroup>();
     Dictionary<string,int> _fileIndex = new Dictionary<string,int>(StringComparer.OrdinalIgnoreCase); // rel -> index in _files
     // Manifest MD5 map (rel -> md5) se disponibile per la versione
-    Dictionary<string,string> _md5Map = null;
+    Dictionary<string,string>? _md5Map;
     // Async scan state
     bool _isScanning = false;
     int _scanTotal = 0, _scanProcessed = 0;
     double _scanStartTime;
-    CancellationTokenSource _scanCts;
+    CancellationTokenSource? _scanCts;
     ConcurrentQueue<(int idx, DiffState state, long sizeVer, long sizeProj)> _scanResults = new ConcurrentQueue<(int, DiffState, long, long)>();
     bool _drainHookAdded = false;
-    string _currentVersionRoot;
-    VersionInfo _versionInfo;
-    VersionDeltaMetadata _deltaMetadata;
-    string _resolvedSnapshotRoot;
-    string _snapshotWarning;
+    string? _currentVersionRoot;
+    VersionInfo? _versionInfo;
+    VersionDeltaMetadata? _deltaMetadata;
+    string? _resolvedSnapshotRoot;
+    string? _snapshotWarning;
     // (HashCache disabled fallback) – se HashCache.cs non ancora compilato nell'ambiente, usiamo MD5 diretto.
 
     const string PREF_FOLD_SUMMARY = "ASB_Restore_Fold_Summary";
@@ -73,8 +73,8 @@ namespace AvatarSmartBackup
     static readonly Color SummaryColorChanged = new Color(0.77f, 0.55f, 0.16f, 0.22f);
     static readonly Color SummaryColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
     const float SummaryBadgeWidth = 150f;
-    static GUIStyle _summaryBadgeLabelStyle;
-    static GUIStyle _summaryTypeLabelStyle;
+    static GUIStyle? _summaryBadgeLabelStyle;
+    static GUIStyle? _summaryTypeLabelStyle;
 
         void OnEnable()
         {
@@ -100,34 +100,37 @@ namespace AvatarSmartBackup
             if (!force && _settings != null && EditorApplication.timeSinceStartup < _nextSettingsRefresh)
                 return;
 
+            BackupSettings? loaded = null;
             try
             {
-                _settings = BackupManager.LoadSettings();
+                loaded = BackupManager.LoadSettings();
             }
             catch (Exception ex)
             {
                 Log.Warn("RestorePreview: failed to load settings " + ex.Message);
-                _settings = new BackupSettings { onboardingCompleted = true, easyMode = false };
+                loaded = new BackupSettings { onboardingCompleted = true, easyMode = false };
             }
 
+            _settings = loaded;
             _nextSettingsRefresh = EditorApplication.timeSinceStartup + 5f;
 
-            if (_settings == null)
+            var settings = _settings;
+            if (settings == null)
             {
                 _easyMode = false;
                 _requireModeChoice = false;
                 return;
             }
 
-            bool easyFromSettings = _settings.easyMode || !_settings.AdvancedMode;
-            if (_settings.easyMode != easyFromSettings && _settings.onboardingCompleted)
+            bool easyFromSettings = settings.easyMode || !settings.AdvancedMode;
+            if (settings.easyMode != easyFromSettings && settings.onboardingCompleted)
             {
-                _settings.easyMode = easyFromSettings;
-                try { BackupManager.SaveSettings(_settings); }
+                settings.easyMode = easyFromSettings;
+                try { BackupManager.SaveSettings(settings); }
                 catch (Exception ex) { Log.Warn("RestorePreview: failed to sync easy mode flag " + ex.Message); }
             }
 
-            _requireModeChoice = !_settings.onboardingCompleted;
+            _requireModeChoice = !settings.onboardingCompleted;
             _easyMode = easyFromSettings;
             if (_requireModeChoice)
             {
@@ -1100,12 +1103,12 @@ Destination: {1}"), restored, targetRoot), "OK");
         {
             var rect = GUILayoutUtility.GetRect(SummaryBadgeWidth, 20f, GUILayout.MaxWidth(SummaryBadgeWidth));
             EditorGUI.DrawRect(rect, tint);
-            _summaryBadgeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            var labelStyle = _summaryBadgeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
             {
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = Color.white }
             };
-            GUI.Label(rect, text, _summaryBadgeLabelStyle);
+            GUI.Label(rect, text, labelStyle);
         }
 
         void DrawVersionTypeBadge()
@@ -1116,7 +1119,7 @@ Destination: {1}"), restored, targetRoot), "OK");
             var rect = EditorGUILayout.GetControlRect(false, 22f);
             var tint = _versionInfo.isCheckpoint ? SummaryColorCheckpoint : SummaryColorIncremental;
             EditorGUI.DrawRect(rect, tint);
-            _summaryTypeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            var typeLabelStyle = _summaryTypeLabelStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
             {
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = Color.white }
@@ -1124,7 +1127,7 @@ Destination: {1}"), restored, targetRoot), "OK");
             string label = _versionInfo.isCheckpoint
                 ? AvatarSmartBackup.Localization.L.T("vc.summary.checkpoint", "Full checkpoint (complete snapshot).")
                 : string.Format(AvatarSmartBackup.Localization.L.T("vc.summary.incremental", "Incremental version (based on checkpoint #{0})."), _versionInfo.checkpointId > 0 ? _versionInfo.checkpointId.ToString() : "--");
-            GUI.Label(new Rect(rect.x + 8f, rect.y + 3f, rect.width - 16f, rect.height - 6f), label, _summaryTypeLabelStyle);
+            GUI.Label(new Rect(rect.x + 8f, rect.y + 3f, rect.width - 16f, rect.height - 6f), label, typeLabelStyle);
         }
 
         void RefreshCategoryView(CategoryGroup cat, CategoryViewCache cache)

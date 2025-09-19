@@ -13,7 +13,7 @@ namespace AvatarSmartBackup
         private Vector2 _scrollPosition;
         private List<VersionInfo> _versions = new List<VersionInfo>();
         private bool _isLoading = true;
-        private string _errorMessage = null;
+        private string? _errorMessage;
         // [MenuItem("Tools/Avatar Smart Backup/Versions")]
         public static void Open()
         {
