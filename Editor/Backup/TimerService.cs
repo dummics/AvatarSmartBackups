@@ -11,13 +11,13 @@ namespace AvatarSmartBackup
     {
         static readonly double UpdateEverySec = 2.0; // Reduced frequency for less overhead (was 0.5s)
         static double _nextTick;
-        static BackupSettings _cached = null!;
+        static BackupSettings? _cached;
         static double _nextReload;
 
         static TimerService()
         {
             EditorApplication.update += Update;
-            var settings = BackupManager.LoadSettings();
+            var settings = BackupManager.LoadSettings() ?? new BackupSettings();
             _ = BackupManager.EnsureBenchmarkAsync(settings);
             if (settings.autoRunOnLoad) StartTimerIfNeeded(settings);
             TryHookVRChat();
@@ -27,10 +27,16 @@ namespace AvatarSmartBackup
         {
             if (_cached == null || EditorApplication.timeSinceStartup >= _nextReload)
             {
-                _cached = BackupManager.LoadSettings();
+                _cached = BackupManager.LoadSettings() ?? new BackupSettings();
                 _nextReload = EditorApplication.timeSinceStartup + 10.0; // reload every 10s
             }
-            return _cached;
+            var cached = _cached;
+            if (cached == null)
+            {
+                cached = new BackupSettings();
+                _cached = cached;
+            }
+            return cached;
         }
         public static void InvalidateSettingsCache() { _cached = null; _nextReload = 0; }
 

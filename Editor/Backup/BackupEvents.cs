@@ -30,7 +30,7 @@ namespace AvatarSmartBackup
 
     internal static class BackupEvents
     {
-        public static event Action<BackupRunSummary> BackupCompleted;
+        public static event Action<BackupRunSummary>? BackupCompleted;
 
         public static void RaiseCompleted(in BackupRunSummary summary)
         {
