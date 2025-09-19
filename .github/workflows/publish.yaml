@@ -43,9 +43,32 @@ jobs:
           GH_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
         run: |
           set -e
+          # Debug: vediamo cosa contiene l'artifact
+          echo "=== DEBUG: Contenuto artifact ==="
+          ls -la artifact/
+          
           # Prova a leggere version e name dal pacchetto unzip
           mkdir -p tmp && cd tmp
-          for z in ../artifact/*.zip; do unzip -o "$z" package.json >/dev/null 2>&1 || true; done
+          echo "=== DEBUG: Estrazione package.json ==="
+          for z in ../artifact/*.zip; do 
+            echo "Processing ZIP: $z"
+            if [ -f "$z" ]; then
+              unzip -l "$z" | head -20  # mostra contenuto ZIP
+              unzip -o "$z" package.json >/dev/null 2>&1 || echo "Failed to extract package.json from $z"
+              if [ -f package.json ]; then
+                echo "package.json estratto con successo"
+                break
+              fi
+            fi
+          done
+          
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json non trovato dopo estrazione"
+            echo "Contenuto directory tmp:"
+            ls -la .
+            exit 1
+          fi
+          
           VER=$(jq -r '.version' package.json 2>/dev/null || echo "")
           NAME=$(jq -r '.name' package.json 2>/dev/null || echo "")
           cd ..
@@ -79,12 +102,32 @@ jobs:
         run: |
           set -e
           TAG="${GITHUB_REF#refs/tags/}"
-          # Read version and name from artifact zip
+          
+          # Read version and name from artifact zip (con debug)
           mkdir -p tmp && cd tmp
-          for z in ../artifact/*.zip; do unzip -o "$z" package.json >/dev/null 2>&1 || true; done
-          VER=$(jq -r '.version' package.json)
-          NAME=$(jq -r '.name' package.json)
+          echo "=== DEBUG: Estrazione package.json per listing ==="
+          for z in ../artifact/*.zip; do 
+            echo "Processing ZIP: $z"
+            if [ -f "$z" ]; then
+              unzip -o "$z" package.json >/dev/null 2>&1 || echo "Failed to extract package.json from $z"
+              if [ -f package.json ]; then
+                echo "package.json estratto con successo"
+                break
+              fi
+            fi
+          done
+          
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json non trovato, uso fallback con tag"
+            VER="${TAG}"
+            NAME="AvatarSmartBackups"  # fallback name
+          else
+            VER=$(jq -r '.version' package.json)
+            NAME=$(jq -r '.name' package.json)
+          fi
           cd ..
+          
+          echo "Using: NAME=$NAME, VER=$VER"
           ZIPNAME="${NAME}-${VER}.zip"
           URL="https://github.com/dummics/unity-smart-backup/releases/download/${TAG}/${ZIPNAME}"
           NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
