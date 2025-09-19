@@ -7,7 +7,7 @@ namespace AvatarSmartBackup
     [Serializable]
     public class VersionCategoryStat
     {
-        public string category;
+        public string category = "";
         public int count;
         public long bytes;
 
@@ -24,10 +24,10 @@ namespace AvatarSmartBackup
     [Serializable]
     public class VersionDeltaEntry
     {
-        public string relPath;
+        public string relPath = "";
         public long size;
-        public string hash;
-        public string category;
+        public string hash = "";
+        public string category = "";
         public bool isNew;
     }
 

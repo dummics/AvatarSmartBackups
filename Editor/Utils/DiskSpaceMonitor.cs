@@ -42,7 +42,7 @@ namespace AvatarSmartBackup
         const long BytesPerMB = 1024L * 1024L;
         static readonly object _lock = new object();
         static DiskSpaceReport _lastReport;
-        static string _lastBackupRoot;
+        static string _lastBackupRoot = null!;
         static long _lastBackupSizeBytes;
         static DateTime _lastBackupSizeTimestampUtc;
         static readonly TimeSpan SizeCacheDuration = TimeSpan.FromMinutes(5);

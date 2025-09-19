@@ -16,8 +16,8 @@ namespace AvatarSmartBackup
         {
             public long size;
             public long ticks;
-            public string md5;
-            public string sha256;
+            public string md5 = "";
+            public string sha256 = "";
         }
 
         static readonly Dictionary<string, Entry> _cache = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);

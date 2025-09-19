@@ -11,7 +11,7 @@ namespace AvatarSmartBackup
     {
         static readonly double UpdateEverySec = 2.0; // Reduced frequency for less overhead (was 0.5s)
         static double _nextTick;
-        static BackupSettings _cached;
+        static BackupSettings _cached = null!;
         static double _nextReload;
 
         static TimerService()

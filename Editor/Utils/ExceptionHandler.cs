@@ -14,7 +14,7 @@ namespace AvatarSmartBackup
         /// <summary>
         /// Execute an action with automatic exception handling and logging
         /// </summary>
-        public static void SafeExecute(Action action, string operationName, string userFriendlyMessage = null)
+        public static void SafeExecute(Action action, string operationName, string? userFriendlyMessage = null)
         {
             try
             {

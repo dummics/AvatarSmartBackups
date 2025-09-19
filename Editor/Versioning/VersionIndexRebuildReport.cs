@@ -24,7 +24,7 @@ namespace AvatarSmartBackup
     public class VersionIndexIssueEntry
     {
         public int versionId;
-        public string message;
+        public string message = "";
     }
 }
 #endif
