@@ -73,6 +73,24 @@ namespace AvatarSmartBackup
             TimerService.InvalidateSettingsCache();
             Open();
         }
+
+        [MenuItem("Avatar Smart Backup/About", false, 100)]
+        public static void ShowAbout()
+        {
+            var packageName = Utils.PackageInfo.GetDisplayName();
+            var version = Utils.PackageInfo.GetVersion();
+            var description = Utils.PackageInfo.GetDescription();
+            var author = Utils.PackageInfo.GetAuthor();
+            var packageId = Utils.PackageInfo.GetPackageName();
+
+            var message = $"{packageName}\n\n" +
+                         $"Version: {version}\n" +
+                         $"Package ID: {packageId}\n" +
+                         $"Author: {author}\n\n" +
+                         $"{description}";
+
+            UnityEditor.EditorUtility.DisplayDialog("About Avatar Smart Backup", message, "OK");
+        }
         void OnEnable()
         {
             _settings = BackupManager.LoadSettings();
