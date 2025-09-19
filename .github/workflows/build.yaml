@@ -97,12 +97,30 @@ jobs:
       - name: Prepare Editor folder
         shell: pwsh
         run: |
+          Write-Host "=== DEBUG: Cercando DLL dopo build ==="
+          Write-Host "Directory corrente: $(Get-Location)"
+          Write-Host "Struttura cartelle bin:"
+          Get-ChildItem -Recurse -Directory -Name bin -ErrorAction SilentlyContinue | ForEach-Object {
+            Write-Host "Trovata cartella bin: $_"
+            Get-ChildItem "$_" -Recurse | Format-Table -AutoSize
+          }
+          Write-Host "Tutte le DLL trovate:"
+          Get-ChildItem -Recurse -Include *.dll -Path . | ForEach-Object {
+            Write-Host "DLL: $($_.FullName)"
+          }
+          
           New-Item -ItemType Directory -Force -Path Editor | Out-Null
           $dlls = Get-ChildItem -Recurse -Include *.dll -Path . |
             Where-Object { $_.FullName -match "\\bin\\${{ inputs.configuration }}\\net48\\" }
-          if ($dlls.Count -eq 0) { Write-Error "Nessuna DLL net48 trovata"; exit 1 }
+          if ($dlls.Count -eq 0) { 
+            Write-Host "Tentativo fallback - cerco DLL in qualsiasi cartella bin:"
+            $dlls = Get-ChildItem -Recurse -Include *.dll -Path . |
+              Where-Object { $_.FullName -match "\\bin\\" -and $_.Name -like "*AvatarSmartBackups*" }
+          }
+          if ($dlls.Count -eq 0) { Write-Error "Nessuna DLL trovata"; exit 1 }
           foreach ($d in $dlls) {
             Copy-Item $d.FullName -Destination "Editor\$($d.Name)" -Force
+            Write-Host "Copiata: $($d.FullName) -> Editor\$($d.Name)"
           }
           Write-Host "Editor content:"; Get-ChildItem Editor | Format-Table -AutoSize
 
