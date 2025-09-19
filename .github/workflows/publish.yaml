@@ -106,21 +106,25 @@ jobs:
           # Read version and name from artifact zip (con debug)
           mkdir -p tmp && cd tmp
           echo "=== DEBUG: Estrazione package.json per listing ==="
+          # Assicurati che il globbing funzioni
+          shopt -s nullglob
           for z in ../artifact/*.zip; do 
-            echo "Processing ZIP: $z"
             if [ -f "$z" ]; then
+              echo "Processing ZIP: $z"
               unzip -o "$z" package.json >/dev/null 2>&1 || echo "Failed to extract package.json from $z"
               if [ -f package.json ]; then
                 echo "package.json estratto con successo"
                 break
               fi
+            else
+              echo "No ZIP files found in ../artifact/"
             fi
           done
           
           if [ ! -f package.json ]; then
             echo "ERROR: package.json non trovato, uso fallback con tag"
             VER="${TAG}"
-            NAME="AvatarSmartBackups"  # fallback name
+            NAME="dum.incb.system"  # Nome corretto del pacchetto VPM
           else
             VER=$(jq -r '.version' package.json)
             NAME=$(jq -r '.name' package.json)
