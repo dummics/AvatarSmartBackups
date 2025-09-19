@@ -1,0 +1,132 @@
+name: Publish (reusable)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  ARTIFACT_NAME: release-zip
+
+jobs:
+  publish:
+    name: Publish Release & Update listing
+    runs-on: self-hosted
+    steps:
+      - name: Download ZIP artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ./artifact
+
+      - name: Inspect downloaded artifact
+        run: ls -la artifact
+
+      - name: Publish release to PUBLIC repo (softprops) [on tag]
+        id: softprops
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.DIST_REPO_TOKEN }}
+          repository: dummics/unity-smart-backup
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          files: artifact/*
+          overwrite_files: true
+          generate_release_notes: true
+
+      - name: Force re-upload assets with gh --clobber [on tag]
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.DIST_REPO_TOKEN }}
+        run: |
+          set -e
+          # Prova a leggere version e name dal pacchetto unzip
+          mkdir -p tmp && cd tmp
+          for z in ../artifact/*.zip; do unzip -o "$z" package.json >/dev/null 2>&1 || true; done
+          VER=$(jq -r '.version' package.json 2>/dev/null || echo "")
+          NAME=$(jq -r '.name' package.json 2>/dev/null || echo "")
+          cd ..
+
+          if [ -z "$VER" ] || [ -z "$NAME" ]; then
+            echo "WARN: Unable to read version/name from zip; falling back to tag only"
+            VER="${GITHUB_REF#refs/tags/}"
+          fi
+
+          REPO="dummics/unity-smart-backup"
+          shopt -s nullglob
+          ASSETS=(artifact/*)
+          echo "Ensuring release assets are updated (clobber)..."
+          if gh release view "$VER" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$VER" "${ASSETS[@]}" --repo "$REPO" --clobber
+          else
+            gh release create "$VER" "${ASSETS[@]}" --repo "$REPO" -t "$VER" -n "$VER"
+          fi
+
+      - name: Checkout listing repo for update (only on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/checkout@v4
+        with:
+          repository: dummics/unity-smart-backup
+          token: ${{ secrets.DIST_REPO_TOKEN }}
+          path: listing
+
+      - name: Patch listing/source.json
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: listing
+        run: |
+          set -e
+          TAG="${GITHUB_REF#refs/tags/}"
+          # Read version and name from artifact zip
+          mkdir -p tmp && cd tmp
+          for z in ../artifact/*.zip; do unzip -o "$z" package.json >/dev/null 2>&1 || true; done
+          VER=$(jq -r '.version' package.json)
+          NAME=$(jq -r '.name' package.json)
+          cd ..
+          ZIPNAME="${NAME}-${VER}.zip"
+          URL="https://github.com/dummics/unity-smart-backup/releases/download/${TAG}/${ZIPNAME}"
+          NOW="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+          [ -f source.json ] || echo '{"packages":[]}' > source.json
+
+          SAN="source.sanitized.json"
+          if ! jq '.' source.json >/dev/null 2>&1; then
+            perl -0777 -pe 's/,\s*([}\]])/\1/g' source.json > "$SAN"
+          else
+            cp source.json "$SAN"
+          fi
+
+          jq --arg name "$NAME" --arg url "$URL" --arg now "$NOW" '
+            (.packages //= [])
+            | (.packages |= map(select((.name // "") != "")))
+            | if (.packages | map(.name) | index($name)) != null then
+                (.packages |= map(
+                  if .name == $name then
+                    .updatedAt = $now
+                    | (.releases //= [])
+                    | .releases += [$url]
+                    | .releases |= unique
+                  else . end))
+              else
+                (.packages += [{name: $name, updatedAt: $now, releases: [$url]}])
+              end
+          ' "$SAN" > source.tmp && mv source.tmp source.json
+
+          jq '.' source.json >/dev/null
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          git commit -m "Release $NAME $VER (@${TAG}) – update listing at $NOW"
+
+          git remote set-url origin "https://x-access-token:${{ secrets.DIST_REPO_TOKEN }}@github.com/dummics/unity-smart-backup.git"
+          git pull --ff-only
+          git push origin HEAD:main
+
+      - name: Final summary (done)
+        if: always()
+        run: |
+          echo "Publish finished" > $GITHUB_STEP_SUMMARY
+          echo "- ZIP artifact: $(ls artifact | head -n1)" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,128 @@
+name: Build (reusable Windows net48)
+
+on:
+  workflow_call:
+    inputs:
+      project:
+        description: Path a .sln o .csproj
+        required: false
+        type: string
+        default: .
+      configuration:
+        description: Configurazione build
+        required: false
+        type: string
+        default: Release
+    outputs:
+      zipfile:
+        description: Nome file zip VPM generato
+        value: ${{ jobs.build.outputs.zipfile }}
+
+permissions:
+  contents: write
+
+env:
+  ARTIFACT_NAME: release-zip
+
+jobs:
+  build:
+    name: Build DLL & Package ZIP (Windows net48)
+    # Usa il tuo runner self-hosted Windows:
+    runs-on: [self-hosted, self-hosted-windows]
+    # Se vuoi poter usare anche GitHub-hosted: cambia a "windows-latest"
+    outputs:
+      zipfile: ${{ steps.pkgzip.outputs.zip }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout Unity Managed DLLs
+        uses: actions/checkout@v4
+        with:
+          repository: dummics/unity-managed-libs   # la repo che hai creato
+          ref: main
+          path: unity-libs
+          token: ${{ secrets.DLL_ACCESS_TOKEN }} # PAT con permesso repo
+      # Cache NuGet (standard)
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\NuGet\Cache
+            ~\.nuget\packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/packages.lock.json', '**/*.csproj', '**/*.sln') }}
+          restore-keys: |
+            nuget-${{ runner.os }}-
+
+      # (Opzionale) Forza una versione di .NET SDK, utile su hosted
+      # - uses: actions/setup-dotnet@v4
+      #   with:
+      #     dotnet-version: '8.0.x'
+
+      # IMPORTANTISSIMO: trovare UNITY_MANAGED (Unity installata o cartella unity-libs nel repo)
+      - name: Locate UNITY_MANAGED
+        shell: pwsh
+        run: |
+          $cands = @(
+            $env:UNITY_MANAGED,
+            "${{ github.workspace }}\unity-libs",  # fallback: cartella nel repo
+            "C:\Program Files\Unity\Hub\Editor\2022.3.60f1\Editor\Data\Managed",
+            "C:\Program Files\Unity\Hub\Editor\2022.3.22f1\Editor\Data\Managed"
+          )
+          $found = $null
+          foreach ($p in $cands) {
+            if ([string]::IsNullOrWhiteSpace($p)) { continue }
+            if (Test-Path (Join-Path $p 'UnityEditor.dll')) { $found = $p; break }
+          }
+          if (-not $found) {
+            Write-Error "UnityEditor.dll non trovato. Installa Unity sul runner oppure committa unity-libs nel repo."; exit 1
+          }
+          "UNITY_MANAGED=$found" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "::notice::UNITY_MANAGED set to $found"
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore "${{ inputs.project }}"
+
+      # Compila .NET Framework 4.8
+      - name: Build net48
+        shell: pwsh
+        run: |
+          dotnet build "${{ inputs.project }}" -c "${{ inputs.configuration }}" -f net48 --no-restore `
+            -p:UNITY_MANAGED="${env:UNITY_MANAGED}" `
+            -p:WarningsAsErrors=false `
+            -p:AppendTargetFrameworkToOutputPath=false
+
+      # Raccogli DLL net48 e prepara la cartella Editor
+      - name: Prepare Editor folder
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path Editor | Out-Null
+          $dlls = Get-ChildItem -Recurse -Include *.dll -Path . |
+            Where-Object { $_.FullName -match "\\bin\\${{ inputs.configuration }}\\net48\\" }
+          if ($dlls.Count -eq 0) { Write-Error "Nessuna DLL net48 trovata"; exit 1 }
+          foreach ($d in $dlls) {
+            Copy-Item $d.FullName -Destination "Editor\$($d.Name)" -Force
+          }
+          Write-Host "Editor content:"; Get-ChildItem Editor | Format-Table -AutoSize
+
+      # Crea lo ZIP VPM (package.json + Editor/*)
+      - id: pkgzip
+        name: Create VPM ZIP
+        shell: pwsh
+        run: |
+          if (-not (Test-Path package.json)) { throw "package.json mancante nella root del repo" }
+          $pkg = Get-Content package.json | ConvertFrom-Json
+          $name = $pkg.name
+          $ver  = $pkg.version
+          if (-not $name -or -not $ver) { throw "name/version mancanti in package.json" }
+          $zip = "$name-$ver.zip"
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Compress-Archive -Path package.json, Editor -DestinationPath "artifact\$zip" -Force
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact/*.zip

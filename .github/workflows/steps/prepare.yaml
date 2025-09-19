@@ -1,0 +1,56 @@
+name: Prepare (reusable)
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: package.json version
+        value: ${{ jobs.prepare.outputs.version }}
+      pkgname:
+        description: package.json name
+        value: ${{ jobs.prepare.outputs.pkgname }}
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  prepare:
+    name: Prepare (read version & pkg name)
+    runs-on: self-hosted
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      pkgname: ${{ steps.meta.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure jq
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+
+      - id: meta
+        name: Read package.json
+        shell: bash
+        run: |
+          set -e
+          VER=$(jq -r '.version' package.json)
+          NAME=$(jq -r '.name' package.json)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "name=$NAME"   >> $GITHUB_OUTPUT
+          echo "Package: $NAME  Version: $VER"
+
+      - name: Validate tag vs package.json (on tag push)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${{ steps.meta.outputs.version }}"
+          TAG_NOV=${TAG#v}
+          if [ "$TAG_NOV" != "$VER" ]; then
+            echo "Tag ($TAG) != version ($VER) in package.json"; exit 1
+          fi
+
+      - name: Summary (started)
+        run: echo "Build started for ${{ steps.meta.outputs.name }}@${{ steps.meta.outputs.version }}" > $GITHUB_STEP_SUMMARY
