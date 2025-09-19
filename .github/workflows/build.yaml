@@ -119,13 +119,18 @@ jobs:
         shell: pwsh
         run: |
           if (-not (Test-Path package.json)) { throw "package.json mancante nella root del repo" }
+          Write-Host "=== DEBUG: Contenuto package.json ==="
+          Get-Content package.json | Write-Host
           $pkg = Get-Content package.json | ConvertFrom-Json
           $name = $pkg.name
           $ver  = $pkg.version
+          Write-Host "Estratto: name='$name', version='$ver'"
           if (-not $name -or -not $ver) { throw "name/version mancanti in package.json" }
           $zip = "$name-$ver.zip"
+          Write-Host "Nome ZIP finale: $zip"
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
           Compress-Archive -Path package.json, Editor -DestinationPath "artifact\$zip" -Force
+          Write-Host "ZIP creato in: artifact\$zip"
           "zip=$zip" >> $env:GITHUB_OUTPUT
 
       - name: Upload ZIP artifact
