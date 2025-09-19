@@ -14,7 +14,7 @@ namespace AvatarSmartBackup
             public bool IsDirectory;
         }
 
-        public static List<Rule> BuildRules(BackupSettings settings)
+        public static List<Rule> BuildRules(BackupSettings? settings)
         {
             var result = new List<Rule>();
             if (settings?.trackedRoots == null || settings.trackedRoots.Count == 0)
@@ -39,7 +39,7 @@ namespace AvatarSmartBackup
             return result;
         }
 
-        public static List<string> NormalizeForStorage(IEnumerable<string> entries)
+        public static List<string> NormalizeForStorage(IEnumerable<string>? entries)
         {
             var result = new List<string>();
             if (entries == null) return result;
@@ -54,7 +54,7 @@ namespace AvatarSmartBackup
             return result;
         }
 
-        static string NormalizeRawPath(string raw)
+        static string? NormalizeRawPath(string? raw)
         {
             if (string.IsNullOrWhiteSpace(raw))
                 return null;
@@ -75,7 +75,7 @@ namespace AvatarSmartBackup
             return trimmed;
         }
 
-        public static bool Allows(List<Rule> rules, string relPath)
+        public static bool Allows(List<Rule>? rules, string relPath)
         {
             if (rules == null || rules.Count == 0)
                 return true;

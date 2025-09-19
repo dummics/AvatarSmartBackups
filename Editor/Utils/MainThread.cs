@@ -15,18 +15,24 @@ namespace AvatarSmartBackup
             MainId = Thread.CurrentThread.ManagedThreadId;
         }
 
-        public static void Invoke(Action a)
+        public static void Invoke(Action? action)
         {
-            if (Thread.CurrentThread.ManagedThreadId == MainId) a();
-            else EditorApplication.delayCall += () => a();
+            if (action == null) return;
+            if (Thread.CurrentThread.ManagedThreadId == MainId) action();
+            else EditorApplication.delayCall += () => action();
         }
 
-        public static T InvokeBlocking<T>(Func<T> f)
+        public static T? InvokeBlocking<T>(Func<T>? func)
         {
-            if (Thread.CurrentThread.ManagedThreadId == MainId) return f();
-            T result = default;
+            if (func == null) return default;
+            if (Thread.CurrentThread.ManagedThreadId == MainId) return func();
+            T? result = default;
             var ev = new ManualResetEventSlim();
-            EditorApplication.delayCall += () => { result = f(); ev.Set(); };
+            EditorApplication.delayCall += () =>
+            {
+                result = func();
+                ev.Set();
+            };
             ev.Wait();
             return result;
         }

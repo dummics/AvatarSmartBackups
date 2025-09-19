@@ -11,7 +11,7 @@ namespace AvatarSmartBackup
         readonly string _root;
         readonly string _stagingRoot;
 
-        public ContentAddressableStore(string storeRoot = null)
+        public ContentAddressableStore(string? storeRoot = null)
         {
             _root = storeRoot ?? Path.Combine(FileUtilEx.BackupRoot, "Store");
             _stagingRoot = Path.Combine(_root, "tmp");
@@ -19,7 +19,7 @@ namespace AvatarSmartBackup
             Directory.CreateDirectory(_stagingRoot);
         }
 
-        public string GetBlobPath(string hash)
+        public string GetBlobPath(string? hash)
         {
             if (string.IsNullOrEmpty(hash) || hash.Length < 6)
                 return string.Empty;
@@ -28,7 +28,7 @@ namespace AvatarSmartBackup
             return Path.Combine(_root, first, second, hash);
         }
 
-        public bool Exists(string hash)
+        public bool Exists(string? hash)
         {
             string path = GetBlobPath(hash);
             return !string.IsNullOrEmpty(path) && File.Exists(path);
@@ -65,7 +65,10 @@ namespace AvatarSmartBackup
                 if (string.IsNullOrEmpty(finalPath))
                     throw new InvalidOperationException("Invalid hash computed for CAS blob.");
 
-                Directory.CreateDirectory(Path.GetDirectoryName(finalPath));
+                var finalDir = Path.GetDirectoryName(finalPath);
+                if (string.IsNullOrEmpty(finalDir))
+                    throw new InvalidOperationException("Invalid final path for CAS blob.");
+                Directory.CreateDirectory(finalDir);
                 if (File.Exists(finalPath))
                 {
                     try { File.Delete(stagingPath); } catch { }
@@ -93,7 +96,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        public bool TryOpenRead(string hash, out FileStream stream)
+        public bool TryOpenRead(string? hash, out FileStream? stream)
         {
             string path = GetBlobPath(hash);
             if (!string.IsNullOrEmpty(path) && File.Exists(path))
@@ -105,7 +108,7 @@ namespace AvatarSmartBackup
             return false;
         }
 
-        static string BytesToHex(byte[] hash)
+        static string BytesToHex(byte[]? hash)
         {
             if (hash == null || hash.Length == 0) return string.Empty;
             char[] chars = new char[hash.Length * 2];

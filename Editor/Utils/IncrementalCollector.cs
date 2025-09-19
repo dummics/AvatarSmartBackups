@@ -10,7 +10,7 @@ namespace AvatarSmartBackup
     internal static class IncrementalCollector
     {
         static readonly HashSet<string> Changed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        static FileSystemWatcher _watcher;
+        static FileSystemWatcher? _watcher;
 
         static IncrementalCollector()
         {

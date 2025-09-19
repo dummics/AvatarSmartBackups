@@ -24,21 +24,21 @@ namespace AvatarSmartBackup
             Error = 3
         }
 
-        static void WriteToFile(Level level, string msg, Exception ex = null)
+        static void WriteToFile(Level level, string? msg, Exception? ex = null)
         {
             try
             {
                 Directory.CreateDirectory(LogDir);
-                
+
                 // Check if current log file needs rotation
                 if (File.Exists(CurrentLogFile) && new FileInfo(CurrentLogFile).Length > MaxLogSizeBytes)
                 {
                     RotateLogFiles();
                 }
-                
+
                 string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
-                string line = $"{timestamp} [{level.ToString().ToUpperInvariant()}] {msg}";
-                
+                string line = $"{timestamp} [{level.ToString().ToUpperInvariant()}] {msg ?? string.Empty}";
+
                 if (ex != null)
                 {
                     line += $"{Environment.NewLine}Exception: {ex.GetType().Name}: {ex.Message}";
@@ -91,10 +91,10 @@ namespace AvatarSmartBackup
         }
 
         // Console logging - minimal and user-friendly
-        static void LogToConsole(Level level, string userMessage)
+        static void LogToConsole(Level level, string? userMessage)
         {
-            string consoleMsg = Tag + userMessage;
-            
+            string consoleMsg = Tag + (userMessage ?? string.Empty);
+
             switch (level)
             {
                 case Level.Debug:
@@ -111,36 +111,38 @@ namespace AvatarSmartBackup
         }
 
         // Public API - simplified console messages, detailed file logging
-        public static void Debug(string detailedMsg, string consoleMsg = null)
+        public static void Debug(string detailedMsg, string? consoleMsg = null)
         {
             if (ShouldLogToFile(Level.Debug))
                 WriteToFile(Level.Debug, detailedMsg);
-            
+
             // Only show in console if advanced mode is enabled
             var settings = SafeGetSettings();
             if (settings.DiagnosticsEnabled && !string.IsNullOrEmpty(consoleMsg))
                 LogToConsole(Level.Debug, consoleMsg);
         }
 
-        public static void Info(string detailedMsg, string consoleMsg = null)
+        public static void Info(string detailedMsg, string? consoleMsg = null)
         {
             if (ShouldLogToFile(Level.Info))
                 WriteToFile(Level.Info, detailedMsg);
-            
+
             if (!string.IsNullOrEmpty(consoleMsg))
                 LogToConsole(Level.Info, consoleMsg);
         }
 
-        public static void Warn(string detailedMsg, string consoleMsg = null)
+        public static void Warn(string detailedMsg, string? consoleMsg = null)
         {
-            WriteToFile(Level.Warn, detailedMsg);
-            LogToConsole(Level.Warn, consoleMsg ?? detailedMsg);
+            string safeDetail = detailedMsg ?? string.Empty;
+            WriteToFile(Level.Warn, safeDetail);
+            LogToConsole(Level.Warn, consoleMsg ?? safeDetail);
         }
 
-        public static void Error(string detailedMsg, string consoleMsg = null, Exception ex = null)
+        public static void Error(string detailedMsg, string? consoleMsg = null, Exception? ex = null)
         {
-            WriteToFile(Level.Error, detailedMsg, ex);
-            LogToConsole(Level.Error, consoleMsg ?? detailedMsg);
+            string safeDetail = detailedMsg ?? string.Empty;
+            WriteToFile(Level.Error, safeDetail, ex);
+            LogToConsole(Level.Error, consoleMsg ?? safeDetail);
         }
 
         // Utility methods
@@ -148,7 +150,7 @@ namespace AvatarSmartBackup
         public static string GetCurrentLogFile() => CurrentLogFile;
 
         // Thread-safe cached access alle settings per logging
-        static BackupSettings _cachedSettings;
+        static BackupSettings? _cachedSettings;
         static DateTime _lastSettingsFetch;
         static readonly TimeSpan SettingsCacheLifetime = TimeSpan.FromSeconds(5);
         static readonly object _settingsLock = new object();
@@ -163,7 +165,7 @@ namespace AvatarSmartBackup
                         return _cachedSettings;
                 }
                 // Eseguiamo la fetch sul main thread per sicurezza
-                var s = MainThread.InvokeBlocking(() => BackupManager.LoadSettings());
+                var s = MainThread.InvokeBlocking(() => BackupManager.LoadSettings()) ?? new BackupSettings();
                 lock (_settingsLock)
                 {
                     _cachedSettings = s;

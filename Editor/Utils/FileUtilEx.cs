@@ -9,11 +9,31 @@ namespace AvatarSmartBackup
 {
     internal static class FileUtilEx
     {
-        public static string ProjectRoot => Directory.GetParent(Application.dataPath).FullName;
+        public static string ProjectRoot
+        {
+            get
+            {
+                var parent = Directory.GetParent(Application.dataPath);
+                if (parent == null)
+                    throw new InvalidOperationException("Unable to determine Unity project root directory.");
+                return parent.FullName;
+            }
+        }
         public static string ProjectName => new DirectoryInfo(ProjectRoot).Name;
         public static string BackupRoot => Path.Combine(ProjectRoot, $"{Sanitize(ProjectName)} Backups");
-        public static string Sanitize(string s) { foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_'); return s.Trim(); }
-        public static string MakeRelToProject(string abs) { var r = ProjectRoot.Replace('\\', '/'); var p = abs.Replace('\\', '/'); return p.StartsWith(r + "/") ? p.Substring(r.Length + 1) : p; }
+        public static string Sanitize(string? s)
+        {
+            if (string.IsNullOrEmpty(s)) return string.Empty;
+            foreach (var c in Path.GetInvalidFileNameChars()) s = s.Replace(c, '_');
+            return s.Trim();
+        }
+        public static string MakeRelToProject(string? abs)
+        {
+            if (string.IsNullOrEmpty(abs)) return string.Empty;
+            var r = ProjectRoot.Replace('\\', '/');
+            var p = abs.Replace('\\', '/');
+            return p.StartsWith(r + "/") ? p.Substring(r.Length + 1) : p;
+        }
         public static string AssetToAbs(string ap) => Path.Combine(ProjectRoot, ap);
 
         public static string MD5Of(string file)
@@ -58,8 +78,9 @@ namespace AvatarSmartBackup
             return sb.ToString();
         }
 
-        public static string TryReadGuidFromMeta(string assetAbs)
+        public static string TryReadGuidFromMeta(string? assetAbs)
         {
+            if (string.IsNullOrEmpty(assetAbs)) return null;
             try
             {
                 string meta = assetAbs + ".meta";
@@ -79,7 +100,10 @@ namespace AvatarSmartBackup
 
         public static void AtomicReplace(string tmp, string finalPath)
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(finalPath));
+            var finalDir = Path.GetDirectoryName(finalPath);
+            if (string.IsNullOrEmpty(finalDir))
+                throw new InvalidOperationException("Invalid destination path for atomic replace.");
+            Directory.CreateDirectory(finalDir);
             if (File.Exists(finalPath))
             {
                 try { File.Replace(tmp, finalPath, null, true); }
