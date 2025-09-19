@@ -13,7 +13,7 @@ env:
 jobs:
   publish:
     name: Publish Release & Update listing
-    runs-on: self-hosted
+    runs-on: linux-runner
     steps:
       - name: Download ZIP artifact
         uses: actions/download-artifact@v4

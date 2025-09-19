@@ -28,7 +28,7 @@ jobs:
   build:
     name: Build DLL & Package ZIP (Windows net48)
     # Usa il tuo runner self-hosted Windows:
-    runs-on: [self-hosted, self-hosted-windows]
+    runs-on: windows-runner
     # Se vuoi poter usare anche GitHub-hosted: cambia a "windows-latest"
     outputs:
       zipfile: ${{ steps.pkgzip.outputs.zip }}
@@ -39,7 +39,7 @@ jobs:
       - name: Checkout Unity Managed DLLs
         uses: actions/checkout@v4
         with:
-          repository: dummics/unity-managed-libs   # la repo che hai creato
+          repository: dummics/unity-managed-libs # la repo che hai creato
           ref: main
           path: unity-libs
           token: ${{ secrets.DLL_ACCESS_TOKEN }} # PAT con permesso repo

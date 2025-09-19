@@ -17,7 +17,7 @@ permissions:
 jobs:
   prepare:
     name: Prepare (read version & pkg name)
-    runs-on: self-hosted
+    runs-on: linux-runner
     outputs:
       version: ${{ steps.meta.outputs.version }}
       pkgname: ${{ steps.meta.outputs.name }}
