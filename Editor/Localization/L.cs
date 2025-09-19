@@ -23,7 +23,7 @@ namespace AvatarSmartBackup.Localization
         readonly Dictionary<string, string> _en;
         readonly Dictionary<string, string> _it;
 
-        public DictionaryLocalizationSource(Dictionary<string, string> en, Dictionary<string, string> it = null)
+        public DictionaryLocalizationSource(Dictionary<string, string>? en, Dictionary<string, string>? it = null)
         {
             _en = en ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             _it = it ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -103,12 +103,12 @@ namespace AvatarSmartBackup.Localization
             AddSource(new DictionaryLocalizationSource(en, it));
         }
 
-        public static string T(string key, string fallback = null, params object[] args)
+        public static string T(string key, string? fallback = null, params object[]? args)
         {
             if (string.IsNullOrEmpty(key)) return fallback ?? string.Empty;
             EnsureInitialized();
 
-            string text = null;
+            string? text = null;
             foreach (var s in _sources)
             {
                 if (s.TryGet(key, Current, out text)) break;
@@ -126,15 +126,15 @@ namespace AvatarSmartBackup.Localization
                 try { text = string.Format(text, args); }
                 catch (FormatException) { /* ignore formatting errors */ }
             }
-            return text;
+            return text ?? string.Empty;
         }
 
-        public static GUIContent C(string key, string fallback = null)
+        public static GUIContent C(string key, string? fallback = null)
         {
             return new GUIContent(T(key, fallback));
         }
 
-        public static GUIContent C(string key, string fallback, string tooltipKey, string tooltipFallback = null)
+        public static GUIContent C(string key, string? fallback, string tooltipKey, string? tooltipFallback = null)
         {
             return new GUIContent(T(key, fallback), T(tooltipKey, tooltipFallback));
         }

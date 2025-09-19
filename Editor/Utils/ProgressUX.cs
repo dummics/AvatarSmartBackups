@@ -29,13 +29,13 @@ namespace AvatarSmartBackup
             _remove = _progressType.GetMethod("Remove", new[] { typeof(int) });
         }
 
-        public static int Start(string title, string desc, bool cancellable, Func<bool> onCancel = null)
+        public static int Start(string title, string desc, bool cancellable, Func<bool>? onCancel = null)
         {
             Ensure();
             if (_progressType == null) return -1;
             try
             {
-                return MainThread.InvokeBlocking(() =>
+                var result = MainThread.InvokeBlocking(() =>
                 {
                     int id;
                     if (_start != null && _start.GetParameters().Length == 3)
@@ -64,15 +64,16 @@ namespace AvatarSmartBackup
                     }
                     return id;
                 });
+                return result ?? -1;
             }
             catch { return -1; }
         }
 
-        public static void Report(int id, float p, string desc)
+        public static void Report(int id, float p, string? desc)
         {
             if (id < 0) return;
             Ensure();
-            try { MainThread.Invoke(() => _report?.Invoke(null, new object[] { id, Mathf.Clamp01(p), desc })); }
+            try { MainThread.Invoke(() => _report?.Invoke(null, new object[] { id, Mathf.Clamp01(p), desc ?? string.Empty })); }
             catch { /* ignore */ }
         }
 
