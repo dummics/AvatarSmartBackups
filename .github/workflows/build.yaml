@@ -93,11 +93,13 @@ jobs:
             -p:WarningsAsErrors=false `
             -p:AppendTargetFrameworkToOutputPath=false
 
-      # Raccogli DLL net48 e prepara la cartella Editor
-      - name: Prepare Editor folder
+      # Raccogli DLL net48 e prepara cartella temporanea pulita
+      - name: Prepare clean package folder
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path Editor | Out-Null
+          # Crea cartella temporanea pulita per la distribuzione
+          New-Item -ItemType Directory -Force -Path temp-package\Editor | Out-Null
+          
           # Cerca prima nel path standard con target framework
           $dlls = Get-ChildItem -Recurse -Include *.dll -Path . |
             Where-Object { $_.FullName -match "\\bin\\${{ inputs.configuration }}\\net48\\" }
@@ -107,21 +109,38 @@ jobs:
               Where-Object { $_.FullName -match "\\bin\\${{ inputs.configuration }}\\" -and $_.Name -like "*AvatarSmartBackups*" }
           }
           if ($dlls.Count -eq 0) { Write-Error "Nessuna DLL trovata"; exit 1 }
+          
+          # Copia solo le DLL nella cartella temporanea
           foreach ($d in $dlls) {
-            Copy-Item $d.FullName -Destination "Editor\$($d.Name)" -Force
-            Write-Host "Copiata: $($d.Name)"
+            Copy-Item $d.FullName -Destination "temp-package\Editor\$($d.Name)" -Force
+            Write-Host "Copiata DLL: $($d.Name)"
           }
-          Write-Host "Editor content:"; Get-ChildItem Editor -Name
+          
+          # Copia package.json nella cartella temporanea
+          Copy-Item package.json -Destination temp-package\package.json -Force
+          
+          # Copia la cartella Resources se esiste (maiuscolo per compatibilità pacchetti Unity)
+          if (Test-Path Resources) {
+            Copy-Item Resources -Destination temp-package\Resources -Recurse -Force
+            Write-Host "Copiata cartella Resources"
+          }
+          
+          Write-Host "=== Contenuto finale del package ==="
+          Write-Host "Root files:"; Get-ChildItem temp-package -Name
+          Write-Host "Editor files:"; Get-ChildItem temp-package\Editor -Name
+          if (Test-Path temp-package\Resources) {
+            Write-Host "Resources files:"; Get-ChildItem temp-package\Resources -Name
+          }
 
-      # Crea lo ZIP VPM (package.json + Editor/*)
+      # Crea lo ZIP VPM (package.json + Editor/* dalla cartella temporanea)
       - id: pkgzip
         name: Create VPM ZIP
         shell: pwsh
         run: |
-          if (-not (Test-Path package.json)) { throw "package.json mancante nella root del repo" }
+          if (-not (Test-Path temp-package\package.json)) { throw "package.json mancante nella cartella temporanea" }
           Write-Host "=== DEBUG: Contenuto package.json ==="
-          Get-Content package.json | Write-Host
-          $pkg = Get-Content package.json | ConvertFrom-Json
+          Get-Content temp-package\package.json | Write-Host
+          $pkg = Get-Content temp-package\package.json | ConvertFrom-Json
           $name = $pkg.name
           $ver  = $pkg.version
           Write-Host "Estratto: name='$name', version='$ver'"
@@ -129,7 +148,14 @@ jobs:
           $zip = "$name-$ver.zip"
           Write-Host "Nome ZIP finale: $zip"
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Compress-Archive -Path package.json, Editor -DestinationPath "artifact\$zip" -Force
+          
+          # Comprimi dalla cartella temporanea (DLL + package.json + Resources)
+          Push-Location temp-package
+          $itemsToCompress = @("package.json", "Editor")
+          if (Test-Path Resources) { $itemsToCompress += "Resources" }
+          Compress-Archive -Path $itemsToCompress -DestinationPath "..\artifact\$zip" -Force
+          Pop-Location
+          
           Write-Host "ZIP creato in: artifact\$zip"
           "zip=$zip" >> $env:GITHUB_OUTPUT
 
