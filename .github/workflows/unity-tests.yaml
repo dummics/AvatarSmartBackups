@@ -1,54 +1,45 @@
-name: unity-plugin-tests
+name: Unity EditMode Tests
 
 on:
   workflow_dispatch:
-  #push:
-   # tags:
-   #   - "*"
+  # Se vuoi eseguire i test automaticamente su PR e push, decommenta le righe qui sotto
+  pull_request:
+    branches:
+      - versioning-main
+      - master
+  push:
+    branches:
+      - versioning-main
+      - master
+
+concurrency:
+  group: unity-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
-    name: Run editor utility tests
+  unity-tests:
+    name: Run Unity EditMode tests (2022.3)
     runs-on: ubuntu-latest
-    if: false
+    # Job eseguito solo se hai configurato il secret UNITY_LICENSE
+    if: ${{ secrets.UNITY_LICENSE != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - name: Run EditMode tests
+        uses: game-ci/unity-test-runner@v4
         with:
-          dotnet-version: '8.0.x'
+          unityVersion: 2022.3.0f1
+          testMode: editmode
+          projectPath: .
+          githubToken: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
 
-      - name: Restore dependencies
-        run: dotnet restore tests/AvatarSmartBackups.Tests/AvatarSmartBackups.Tests.csproj
-
-      - name: Run unit tests
-        run: dotnet test tests/AvatarSmartBackups.Tests/AvatarSmartBackups.Tests.csproj --configuration Release
-
-  build_core:
-    name: Build Core DLL (net48)
+  unity-tests-skip:
+    name: Skip Unity tests (no license configured)
     runs-on: ubuntu-latest
-    needs: test
+    if: ${{ secrets.UNITY_LICENSE == '' }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Build Core (Release) in UnityCI container
-        uses: addnab/docker-run-action@v3
-        with:
-          image: unityci/editor:2022.3.22f1-base-3.0
-          options: -v ${{ github.workspace }}:/workspace -w /workspace
-          run: |
-            set -e
-            export UNITY_MANAGED=/opt/unity/Editor/Data/Managed
-            # Install dotnet SDK locally for this container session
-            curl -sSL https://dot.net/v1/dotnet-install.sh -o dotnet-install.sh
-            chmod +x dotnet-install.sh
-            ./dotnet-install.sh --channel 8.0
-            export PATH=$HOME/.dotnet:$PATH
-            dotnet --info
-            dotnet restore src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj
-            dotnet build src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj -c Release -p:ContinuousIntegrationBuild=true
-      - name: Upload Core DLL artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: AvatarSmartBackups.Core-net48
-          path: src/AvatarSmartBackups.Core/bin/Release/net48/AvatarSmartBackups.Core.dll
+      - name: Skip message
+        run: echo "UNITY_LICENSE not set; skipping Unity tests. Configure the secret to enable."
