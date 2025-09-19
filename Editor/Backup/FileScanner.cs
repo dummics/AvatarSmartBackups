@@ -26,7 +26,7 @@ namespace AvatarSmartBackup
 
     internal interface IFileScanner
     {
-        IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string>? dirtyPaths = null);
+        IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string> dirtyPaths = null);
     }
 
     internal sealed class FileScanner : IFileScanner

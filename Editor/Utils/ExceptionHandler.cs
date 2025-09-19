@@ -3,6 +3,8 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
+#nullable enable
+
 namespace AvatarSmartBackup
 {
     /// <summary>
@@ -30,7 +32,7 @@ namespace AvatarSmartBackup
         /// Execute a function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static T SafeExecute<T>(Func<T> func, string operationName, string userFriendlyMessage = null, T defaultValue = default(T))
+        public static T SafeExecute<T>(Func<T> func, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
         {
             try
             {
@@ -39,14 +41,14 @@ namespace AvatarSmartBackup
             catch (Exception ex)
             {
                 HandleException(ex, operationName, userFriendlyMessage!);
-                return defaultValue;
+                return defaultValue!;
             }
         }
 
         /// <summary>
         /// Execute an async action with automatic exception handling and logging
         /// </summary>
-        public static async Task SafeExecuteAsync(Func<Task> asyncAction, string operationName, string userFriendlyMessage = null)
+        public static async Task SafeExecuteAsync(Func<Task> asyncAction, string operationName, string? userFriendlyMessage = null)
         {
             try
             {
@@ -62,7 +64,7 @@ namespace AvatarSmartBackup
         /// Execute an async function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string userFriendlyMessage = null, T defaultValue = default(T))
+        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
         {
             try
             {
@@ -71,7 +73,7 @@ namespace AvatarSmartBackup
             catch (Exception ex)
             {
                 HandleException(ex, operationName, userFriendlyMessage!);
-                return defaultValue;
+                return defaultValue!;
             }
         }
 
