@@ -10,6 +10,8 @@ using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using AvatarSmartBackup.Localization;
+using AvatarSmartBackup.Shared;
+using AvatarSmartBackup.Config;
 
 namespace AvatarSmartBackup
 {
@@ -61,6 +63,8 @@ namespace AvatarSmartBackup
     string? _resolvedSnapshotRoot;
     string? _snapshotWarning;
     // (HashCache disabled fallback) – se HashCache.cs non ancora compilato nell'ambiente, usiamo MD5 diretto.
+    readonly ModernInfoBanner _modernInfoBanner = new ModernInfoBanner();
+    StatusBanner? _statusBanner;
 
     const string PREF_FOLD_SUMMARY = "ASB_Restore_Fold_Summary";
     const string PREF_FOLD_FILTERS = "ASB_Restore_Fold_Filters";
@@ -75,6 +79,8 @@ namespace AvatarSmartBackup
     const float SummaryBadgeWidth = 150f;
     static GUIStyle? _summaryBadgeLabelStyle;
     static GUIStyle? _summaryTypeLabelStyle;
+
+        StatusBanner SharedStatusBanner => _statusBanner ??= new StatusBanner(_modernInfoBanner);
 
         void OnEnable()
         {
@@ -469,7 +475,9 @@ namespace AvatarSmartBackup
         {
             EnsureSettingsLoaded();
 
-            if (_easyMode && (!_showNew || !_showChanged || !_showSame))
+            var layoutMode = _easyMode ? BackupLayoutSchema.LayoutMode.Easy : BackupLayoutSchema.LayoutMode.Advanced;
+
+            if (layoutMode == BackupLayoutSchema.LayoutMode.Easy && (!_showNew || !_showChanged || !_showSame))
             {
                 _showNew = _showChanged = _showSame = true;
                 MarkAllCategoryCachesDirty(true);
@@ -510,7 +518,7 @@ namespace AvatarSmartBackup
                     infoMsg += "\n" + string.Format(L.T("rp.info.changes", "Recorded changes: {0} (removed: {1})."), diffCount,removedCount);
                 if (!string.IsNullOrEmpty(_snapshotWarning))
                     infoMsg += "\n" + _snapshotWarning;
-                EditorGUILayout.HelpBox(infoMsg, MessageType.Info);
+                SharedStatusBanner.Draw(MessageType.Info, infoMsg, spacing: 4f);
             }
 
             if (_requireModeChoice)
@@ -522,15 +530,10 @@ namespace AvatarSmartBackup
             if (_isScanning)
             {
                 float p = _scanTotal > 0 ? (float)_scanProcessed / _scanTotal : 0f;
-                EditorGUILayout.HelpBox(string.Format(L.T("rp.scan.progress", "Scanning files... {0}/{1} ({2:0.0}%)"), _scanProcessed, _scanTotal, p*100f), MessageType.Info);
+                SharedStatusBanner.Draw(MessageType.Info, string.Format(L.T("rp.scan.progress", "Scanning files... {0}/{1} ({2:0.0}%)"), _scanProcessed, _scanTotal, p*100f), spacing: 4f);
                 Rect r = GUILayoutUtility.GetRect(4, 18);
                 EditorGUI.ProgressBar(r, p, L.T("rp.scan.bar", "Building diff"));
                 GUILayout.Space(4);
-            }
-
-            if (_easyMode && !_easyBannerDismissed)
-            {
-                DrawEasyModeBanner();
             }
 
             if (_filter != _lastFilter)
@@ -558,15 +561,74 @@ namespace AvatarSmartBackup
                 MarkAllCategoryCachesDirty(true);
             }
 
-            EditorGUILayout.HelpBox(_easyMode
-                ? L.T("rp.help.easy", "Pick the files you need. Summary, quick filters and the file list are below. The safety backup toggle stays at the bottom.")
-                : L.T("rp.help", "Choose what to restore. Expand sections: Summary, Filters, Selection, Files. The safety backup toggle is in the footer."), MessageType.Info);
+            DrawRestoreLayout(layoutMode);
 
-            // SUMMARY FOLDOUT (FIRST)
+            // Shortcuts: Invio = restore (context aware), Esc = cancel
+            if (Event.current.type == EventType.KeyDown)
+            {
+                if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                { DoRestore(); Event.current.Use(); }
+                else if (Event.current.keyCode == KeyCode.Escape) { Close(); Event.current.Use(); }
+            }
+        }
+
+        void DrawRestoreLayout(BackupLayoutSchema.LayoutMode mode)
+        {
+            foreach (var block in BackupLayoutSchema.RestorePreviewBlocks)
+            {
+                if (!block.Supports(mode))
+                    continue;
+
+                switch (block.Id)
+                {
+                    case BackupLayoutSchema.RestorePreviewBlock.EasyBanner:
+                        DrawEasyBannerIfNeeded();
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.HelperBanner:
+                        DrawHelperBanner(mode);
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.Summary:
+                        DrawSummary(mode);
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.Filters:
+                        DrawFiltersSection(mode);
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.Selection:
+                        DrawSelectionSection(mode);
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.Files:
+                        DrawFilesSection();
+                        break;
+                    case BackupLayoutSchema.RestorePreviewBlock.Footer:
+                        DrawFooter(mode);
+                        break;
+                }
+            }
+        }
+
+        void DrawEasyBannerIfNeeded()
+        {
+            if (_easyBannerDismissed)
+                return;
+            DrawEasyModeBanner();
+        }
+
+        void DrawHelperBanner(BackupLayoutSchema.LayoutMode mode)
+        {
+            SharedStatusBanner.Draw(MessageType.Info, mode == BackupLayoutSchema.LayoutMode.Easy
+                ? L.T("rp.help.easy", "Pick the files you need. Summary, quick filters and the file list are below. The safety backup toggle stays at the bottom.")
+                : L.T("rp.help", "Choose what to restore. Expand sections: Summary, Filters, Selection, Files. The safety backup toggle is in the footer."));
+        }
+
+        void DrawSummary(BackupLayoutSchema.LayoutMode mode)
+        {
             _foldSummary = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSummary, L.T("rp.fold.summary", "Summary"));
             if (_foldSummary)
             {
-                int total = _diffInfos.Count; int news = _diffInfos.Count(d=>d.state==DiffState.New); int changed = _diffInfos.Count(d=>d.state==DiffState.Changed); int same = _diffInfos.Count(d=>d.state==DiffState.Same);
+                int total = _diffInfos.Count;
+                int news = _diffInfos.Count(d => d.state == DiffState.New);
+                int changed = _diffInfos.Count(d => d.state == DiffState.Changed);
+                int same = _diffInfos.Count(d => d.state == DiffState.Same);
                 if (_versionInfo != null)
                 {
                     DrawVersionTypeBadge();
@@ -586,29 +648,31 @@ namespace AvatarSmartBackup
                 }
                 EditorGUILayout.LabelField(string.Format(L.T("rp.stats", "Files: {0}   New: {1}   Changed: {2}   Same: {3}"), total, news, changed, same), EditorStyles.miniLabel);
                 EditorGUILayout.BeginHorizontal();
-                DrawBigStat(L.T("rp.stat.new", "NEW"), news.ToString(), new Color(0.40f,0.80f,0.45f,1f));
-                DrawBigStat(L.T("rp.stat.changed", "CHANGED"), changed.ToString(), new Color(0.95f,0.80f,0.35f,1f));
-                DrawBigStat(L.T("rp.stat.same", "SAME"), same.ToString(), new Color(0.55f,0.55f,0.55f,1f));
+                DrawBigStat(L.T("rp.stat.new", "NEW"), news.ToString(), new Color(0.40f, 0.80f, 0.45f, 1f));
+                DrawBigStat(L.T("rp.stat.changed", "CHANGED"), changed.ToString(), new Color(0.95f, 0.80f, 0.35f, 1f));
+                DrawBigStat(L.T("rp.stat.same", "SAME"), same.ToString(), new Color(0.55f, 0.55f, 0.55f, 1f));
                 GUILayout.FlexibleSpace();
-                if (!_easyMode && GUILayout.Button(new GUIContent(L.T("rp.restore.all", "Restore ALL"), L.T("rp.restore.all.tt", "Restore all files")), GUILayout.Width(120), GUILayout.Height(28)))
+                if (mode == BackupLayoutSchema.LayoutMode.Advanced && GUILayout.Button(new GUIContent(L.T("rp.restore.all", "Restore ALL"), L.T("rp.restore.all.tt", "Restore all files")), GUILayout.Width(120), GUILayout.Height(28)))
                 {
                     SelectAllInternal(true);
                     DoRestore();
                 }
                 EditorGUILayout.EndHorizontal();
-                if (!_easyMode && _extCounts.Count > 0)
+                if (mode == BackupLayoutSchema.LayoutMode.Advanced && _extCounts.Count > 0)
                 {
                     GUILayout.Space(4);
                     EditorGUILayout.LabelField(L.T("rp.top.extensions", "Top extensions"), EditorStyles.miniBoldLabel);
                     EditorGUILayout.BeginHorizontal();
                     EditorGUILayout.BeginVertical(GUILayout.MaxWidth(160));
-                    foreach (var kv in _extCounts.OrderByDescending(k=>k.Value).Take(6)) EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
+                    foreach (var kv in _extCounts.OrderByDescending(k => k.Value).Take(6))
+                        EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
                     EditorGUILayout.EndVertical();
                     if (_assetTypeCounts.Count > 0)
                     {
                         EditorGUILayout.BeginVertical(GUILayout.MaxWidth(180));
                         EditorGUILayout.LabelField(L.T("rp.asset.types", ".asset types"), EditorStyles.miniBoldLabel);
-                        foreach (var kv in _assetTypeCounts.OrderByDescending(k=>k.Value).Take(6)) EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
+                        foreach (var kv in _assetTypeCounts.OrderByDescending(k => k.Value).Take(6))
+                            EditorGUILayout.LabelField($"{kv.Key} {kv.Value}", EditorStyles.miniLabel);
                         EditorGUILayout.EndVertical();
                     }
                     GUILayout.FlexibleSpace();
@@ -616,33 +680,36 @@ namespace AvatarSmartBackup
                 }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
 
-            // FILTERS FOLDOUT
+        void DrawFiltersSection(BackupLayoutSchema.LayoutMode mode)
+        {
             _foldFilters = EditorGUILayout.BeginFoldoutHeaderGroup(_foldFilters, L.T("rp.fold.filters", "Filters"));
             if (_foldFilters)
             {
-                if (_easyMode)
+                if (mode == BackupLayoutSchema.LayoutMode.Easy)
                     DrawEasyFilters();
                 else
                     DrawAdvancedFilters();
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
 
-            // SELECTION TOOLS FOLDOUT
+        void DrawSelectionSection(BackupLayoutSchema.LayoutMode mode)
+        {
             _foldSelection = EditorGUILayout.BeginFoldoutHeaderGroup(_foldSelection, L.T("rp.fold.selection", "Selection"));
             if (_foldSelection)
             {
-                if (_easyMode)
+                if (mode == BackupLayoutSchema.LayoutMode.Easy)
                     DrawEasySelectionTools();
                 else
                     DrawAdvancedSelectionTools();
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
 
-
-            // (old filters/selection sections removed above)
-
-            // FILES FOLDOUT
+        void DrawFilesSection()
+        {
             _foldFiles = EditorGUILayout.BeginFoldoutHeaderGroup(_foldFiles, "Files");
             if (_foldFiles)
             {
@@ -650,22 +717,26 @@ namespace AvatarSmartBackup
                 bool anyGroupVisible = false;
                 foreach (var cat in _categoriesOrdered)
                 {
-                    if (!_categoryCache.TryGetValue(cat.name, out var cache)) { cache = new CategoryViewCache(); _categoryCache[cat.name]=cache; cache.dirty=true; }
+                    if (!_categoryCache.TryGetValue(cat.name, out var cache))
+                    {
+                        cache = new CategoryViewCache();
+                        _categoryCache[cat.name] = cache;
+                        cache.dirty = true;
+                    }
                     if (cache.dirty)
                     {
                         RefreshCategoryView(cat, cache);
                     }
-                    if (cache.totalVisible==0) continue;
+                    if (cache.totalVisible == 0) continue;
                     anyGroupVisible = true;
 
                     Rect rowRect = EditorGUILayout.BeginHorizontal();
-                    // Tri-state per categoria
-                    bool prevMixed = cache.selectedCount>0 && cache.selectedCount<cache.totalVisible;
+                    bool prevMixed = cache.selectedCount > 0 && cache.selectedCount < cache.totalVisible;
                     EditorGUI.showMixedValue = prevMixed;
-                    bool catToggleState = cache.selectedCount>0;
+                    bool catToggleState = cache.selectedCount > 0;
                     bool newToggleState = EditorGUILayout.Toggle(catToggleState, GUILayout.Width(16));
                     EditorGUI.showMixedValue = false;
-                    if (newToggleState != catToggleState || (prevMixed && newToggleState==catToggleState))
+                    if (newToggleState != catToggleState || (prevMixed && newToggleState == catToggleState))
                     {
                         bool target = !(cache.selectedCount == cache.totalVisible);
                         foreach (var vi in cache.visibleIndices) _selected[vi] = target;
@@ -673,16 +744,17 @@ namespace AvatarSmartBackup
                         RefreshCategoryView(cat, cache);
                     }
                     string badge = string.Empty;
-                    if (cache.newCount>0) badge += $" <color=#41CC55>+{cache.newCount}</color>";
-                    if (cache.changedCount>0) badge += $" <color=#E6C24A>Δ{cache.changedCount}</color>";
-                    GUIStyle foldStyle = new GUIStyle(EditorStyles.foldoutHeader){richText=true};
-                    // Simula foldout full-row cliccabile
+                    if (cache.newCount > 0) badge += $" <color=#41CC55>+{cache.newCount}</color>";
+                    if (cache.changedCount > 0) badge += $" <color=#E6C24A>Δ{cache.changedCount}</color>";
+                    GUIStyle foldStyle = new GUIStyle(EditorStyles.foldoutHeader) { richText = true };
                     Rect foldLabelRect = GUILayoutUtility.GetRect(new GUIContent("tmp"), foldStyle, GUILayout.ExpandWidth(true));
                     string foldText = $"{cat.name} ({cache.selectedCount}/{cache.totalVisible}){badge}";
                     cat.expanded = EditorGUI.Foldout(foldLabelRect, cat.expanded, foldText, true, foldStyle);
-                    // Row click (escluso toggle): se clic dentro label rect e non sul toggle, toggla
-                    if (Event.current.type==EventType.MouseDown && rowRect.Contains(Event.current.mousePosition) && !new Rect(rowRect.x,rowRect.y,16,rowRect.height).Contains(Event.current.mousePosition))
-                    { cat.expanded = !cat.expanded; Event.current.Use(); }
+                    if (Event.current.type == EventType.MouseDown && rowRect.Contains(Event.current.mousePosition) && !new Rect(rowRect.x, rowRect.y, 16, rowRect.height).Contains(Event.current.mousePosition))
+                    {
+                        cat.expanded = !cat.expanded;
+                        Event.current.Use();
+                    }
                     GUILayout.FlexibleSpace();
                     EditorGUILayout.EndHorizontal();
                     if (cat.expanded)
@@ -691,7 +763,7 @@ namespace AvatarSmartBackup
                         foreach (var idxRaw in cache.visibleIndices)
                         {
                             var di = _diffInfos[idxRaw];
-                            if (!_fileIndex.TryGetValue(di.rel, out int realIdx)) continue; // should exist
+                            if (!_fileIndex.TryGetValue(di.rel, out int realIdx)) continue;
                             EditorGUILayout.BeginHorizontal();
                             bool prevSelected = _selected[realIdx];
                             bool newSelected = EditorGUILayout.Toggle(prevSelected, GUILayout.Width(16));
@@ -700,9 +772,9 @@ namespace AvatarSmartBackup
                                 _selected[realIdx] = newSelected;
                                 recalcAfterLoop = true;
                             }
-                            using (new GuiColorScope(di.state == DiffState.New ? new Color(0.55f,0.85f,0.55f,1f)
-                                : di.state == DiffState.Changed ? new Color(0.95f,0.85f,0.55f,1f)
-                                : di.state == DiffState.Same ? new Color(0.8f,0.8f,0.8f,0.8f)
+                            using (new GuiColorScope(di.state == DiffState.New ? new Color(0.55f, 0.85f, 0.55f, 1f)
+                                : di.state == DiffState.Changed ? new Color(0.95f, 0.85f, 0.55f, 1f)
+                                : di.state == DiffState.Same ? new Color(0.8f, 0.8f, 0.8f, 0.8f)
                                 : GUI.color))
                             {
                                 string labelSource = _showNamesOnly ? Path.GetFileName(di.rel) : di.rel;
@@ -737,31 +809,29 @@ namespace AvatarSmartBackup
                 }
                 EditorGUILayout.EndScrollView();
                 ComputeVisibleTotals(out int totalVisible, out int totalSelectedVisible);
-                EditorGUILayout.LabelField(string.Format(L.T("rp.items.selected", "Items: {0}    Selected: {1}"), totalVisible,totalSelectedVisible), EditorStyles.miniLabel);
-                if (!anyGroupVisible || totalVisible==0) EditorGUILayout.HelpBox(L.T("rp.no.files", "No files match the current filters."), MessageType.Info);
+                EditorGUILayout.LabelField(string.Format(L.T("rp.items.selected", "Items: {0}    Selected: {1}"), totalVisible, totalSelectedVisible), EditorStyles.miniLabel);
+                if (!anyGroupVisible || totalVisible == 0)
+                {
+                    SharedStatusBanner.Draw(MessageType.Info, L.T("rp.no.files", "No files match the current filters."));
+                }
             }
             EditorGUILayout.EndFoldoutHeaderGroup();
+        }
 
-
-            // Footer
+        void DrawFooter(BackupLayoutSchema.LayoutMode mode)
+        {
             GUILayout.Space(4);
             EditorGUILayout.BeginHorizontal(EditorStyles.helpBox);
             if (GUILayout.Button(L.T("rp.cancel", "Cancel"), GUILayout.Width(90))) { Close(); }
             GUILayout.FlexibleSpace();
             _backupBefore = GUILayout.Toggle(_backupBefore, new GUIContent(L.T("rp.safety", "Safety Backup"), L.T("rp.safety.tt", "Make a safety copy before restoring")), GUILayout.Width(140));
-            int selectedCount = 0; long selectedSize = 0; for (int i=0;i<_diffInfos.Count;i++) if (_selected[i]) { selectedCount++; selectedSize += _diffInfos[i].size; }
+            int selectedCount = 0;
+            long selectedSize = 0;
+            for (int i = 0; i < _diffInfos.Count; i++) if (_selected[i]) { selectedCount++; selectedSize += _diffInfos[i].size; }
             GUILayout.Label(string.Format(L.T("rp.selected.summary", "Selected: {0} files ({1})"), selectedCount, FormatSize(selectedSize)), EditorStyles.miniLabel);
-            if (!_easyMode && GUILayout.Button(new GUIContent(L.T("rp.restore.copy", "Restore as Copy"), L.T("rp.restore.copy.tt", "Copy selected files to another folder")), GUILayout.Width(150), GUILayout.Height(24))) { DoRestore(true); }
+            if (mode == BackupLayoutSchema.LayoutMode.Advanced && GUILayout.Button(new GUIContent(L.T("rp.restore.copy", "Restore as Copy"), L.T("rp.restore.copy.tt", "Copy selected files to another folder")), GUILayout.Width(150), GUILayout.Height(24))) { DoRestore(true); }
             if (GUILayout.Button(new GUIContent(L.T("rp.restore.selected", "Restore Selected"), L.T("rp.restore.selected.tt", "Restore selected files")), GUILayout.Width(140), GUILayout.Height(24))) { DoRestore(); }
             EditorGUILayout.EndHorizontal();
-
-            // Shortcuts: Invio = restore (context aware), Esc = cancel
-            if (Event.current.type == EventType.KeyDown)
-            {
-                if (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
-                { DoRestore(); Event.current.Use(); }
-                else if (Event.current.keyCode == KeyCode.Escape) { Close(); Event.current.Use(); }
-            }
         }
 
         void DrawEasyModeBanner()
@@ -785,7 +855,7 @@ namespace AvatarSmartBackup
         void DrawModeChoiceGate()
         {
             EditorGUILayout.Space();
-            EditorGUILayout.HelpBox(L.T("rp.mode.gate.body", "Choose how you want to restore files before continuing."), MessageType.Info);
+            SharedStatusBanner.Draw(MessageType.Info, L.T("rp.mode.gate.body", "Choose how you want to restore files before continuing."));
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(L.T("ui.mode.easy", "Easy"), GUILayout.Width(120), GUILayout.Height(28)))
             {
@@ -847,7 +917,7 @@ namespace AvatarSmartBackup
 
         void DrawEasyFilters()
         {
-            EditorGUILayout.HelpBox(L.T("rp.easy.filters.note", "Quick filter only. Advanced toggles live in Advanced mode."), MessageType.Info);
+            SharedStatusBanner.Draw(MessageType.Info, L.T("rp.easy.filters.note", "Quick filter only. Advanced toggles live in Advanced mode."));
             EditorGUILayout.BeginHorizontal();
             bool newHideMeta = EditorGUILayout.ToggleLeft(new GUIContent(L.T("rp.filter.hideMeta", "Hide .meta"), L.T("rp.filter.hideMeta.tt", "Hide .meta")), _hideMeta, GUILayout.Width(160));
             if (newHideMeta != _hideMeta)
@@ -904,7 +974,7 @@ namespace AvatarSmartBackup
 
         void DrawEasySelectionTools()
         {
-            EditorGUILayout.HelpBox(L.T("rp.easy.selection.note", "Quick actions shown. Advanced batch tools are available in Advanced mode."), MessageType.Info);
+            SharedStatusBanner.Draw(MessageType.Info, L.T("rp.easy.selection.note", "Quick actions shown. Advanced batch tools are available in Advanced mode."));
             EditorGUILayout.BeginHorizontal();
             if (GUILayout.Button(L.T("rp.select.all", "Select All"), GUILayout.Width(90))) { SelectAllInternal(true); }
             if (GUILayout.Button(L.T("rp.deselect.all", "Deselect All"), GUILayout.Width(110))) { SelectAllInternal(false); }

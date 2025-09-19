@@ -64,7 +64,9 @@ namespace AvatarSmartBackups.Tests.Editor
                 Render(window);
 
                 var markers = context.LayoutMarkers.ToArray();
-                CollectionAssert.IsSupersetOf(markers, new[] { "ModeSelector", "SchedulerSection", "PrimaryActions", "VersionsOverview", "EasyFooter" });
+                CollectionAssert.IsSupersetOf(markers, new[] { "ModeSelector", "ModeSync", "EasyDashboard", "BodySpacing" });
+                Assert.IsTrue(markers.Any(m => m.StartsWith("EasyDashboard.", StringComparison.Ordinal)), "Easy dashboard should record a responsive snapshot marker.");
+                Assert.IsFalse(markers.Contains("SchedulerSection"), "Easy mode should not render the advanced scheduler section.");
                 Assert.IsFalse(markers.Contains("AdvancedOverview"), "Easy mode should not render advanced overview.");
             }
             finally
