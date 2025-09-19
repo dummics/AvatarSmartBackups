@@ -11,15 +11,15 @@ namespace AvatarSmartBackup
     internal static class VersionRestoreService
     {
         static readonly object RebuildLock = new object();
-        static string _lastWarning;
-        static RestorePreparationResult _lastResult;
+        static string? _lastWarning;
+        static RestorePreparationResult? _lastResult;
 
-        public static string LastWarning => _lastWarning;
-        public static RestorePreparationResult LastResult => _lastResult;
+        public static string? LastWarning => _lastWarning;
+        public static RestorePreparationResult? LastResult => _lastResult;
 
         static string RebuildRoot => Path.Combine(FileUtilEx.ProjectRoot, "Temp", "ASB_Rebuilds");
 
-        public static string PrepareSnapshot(int versionId, bool forceRebuild = false)
+        public static string? PrepareSnapshot(int versionId, bool forceRebuild = false)
         {
             _lastResult = null;
             var result = PrepareSnapshotInternal(versionId, forceRebuild);
@@ -28,7 +28,7 @@ namespace AvatarSmartBackup
             return result?.SnapshotPath;
         }
 
-        static RestorePreparationResult PrepareSnapshotInternal(int versionId, bool forceRebuild)
+        static RestorePreparationResult? PrepareSnapshotInternal(int versionId, bool forceRebuild)
         {
             _lastWarning = null;
             var notices = new List<string>();
@@ -107,7 +107,7 @@ namespace AvatarSmartBackup
             throw new InvalidOperationException($"Restore attempts exceeded for version #{versionId}.");
         }
 
-        static string PrepareSingleVersion(FileBasedVersionManager vm, VersionInfo version, bool forceRebuild, HashSet<int> skipVersions)
+        static string PrepareSingleVersion(FileBasedVersionManager vm, VersionInfo version, bool forceRebuild, HashSet<int>? skipVersions)
         {
             if (version == null)
                 throw new ArgumentNullException(nameof(version));
@@ -151,8 +151,12 @@ namespace AvatarSmartBackup
             return LoadDeltaMetadata(versionDir);
         }
 
-        static void BuildSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir, HashSet<int> skipVersions = null)
+        static void BuildSnapshot(FileBasedVersionManager vm, VersionInfo target, string rebuildDir, HashSet<int>? skipVersions = null)
         {
+            if (vm == null)
+                throw new ArgumentNullException(nameof(vm));
+            if (target == null)
+                throw new ArgumentNullException(nameof(target));
             var chain = BuildChain(vm, target);
             if (chain.Count == 0)
                 throw new InvalidOperationException("Version chain is empty.");
@@ -220,7 +224,7 @@ namespace AvatarSmartBackup
         static List<VersionInfo> BuildChain(FileBasedVersionManager vm, VersionInfo target)
         {
             var chain = new List<VersionInfo>();
-            var current = target;
+            VersionInfo? current = target;
             int guard = 0;
             while (current != null && guard++ < 256)
             {
@@ -379,7 +383,7 @@ namespace AvatarSmartBackup
             return Uri.UnescapeDataString(ru.MakeRelativeUri(pu).ToString()).Replace('/', Path.DirectorySeparatorChar);
         }
 
-        static VersionInfo FindPreviousValidVersion(FileBasedVersionManager vm, int startId, HashSet<int> exclude)
+        static VersionInfo? FindPreviousValidVersion(FileBasedVersionManager vm, int startId, HashSet<int>? exclude)
         {
             if (vm == null) return null;
             int candidateId = Math.Max(0, startId);

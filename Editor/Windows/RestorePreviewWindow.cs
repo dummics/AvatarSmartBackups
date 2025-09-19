@@ -162,7 +162,7 @@ namespace AvatarSmartBackup
             _deltaMetadata = null;
             _resolvedSnapshotRoot = null;
 
-            string srcRoot;
+            string? srcRoot;
             if (_versionId > 0)
             {
                 using var vmInfo = new FileBasedVersionManager();
@@ -175,6 +175,12 @@ namespace AvatarSmartBackup
                 try
                 {
                     srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
+                    if (string.IsNullOrEmpty(srcRoot))
+                    {
+                        var message = string.Format(L.T("rp.restore.prepare.fail", "Failed to prepare snapshot for version {0}:\n{1}"), _versionId, L.T("rp.restore.snapshot.missing", "Snapshot path unavailable."));
+                        EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), message, "OK");
+                        return;
+                    }
                     var prep = VersionRestoreService.LastResult;
                     _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
                     _versionInfo = _resolvedVersionId == _versionId ? requestedInfo : vmInfo.GetVersion(_resolvedVersionId);
@@ -198,20 +204,22 @@ namespace AvatarSmartBackup
                 _snapshotWarning = null;
                 _resolvedVersionId = _versionId;
             }
-            _currentVersionRoot = srcRoot;
-            _resolvedSnapshotRoot = srcRoot;
+            if (string.IsNullOrEmpty(srcRoot)) return;
             if (!Directory.Exists(srcRoot)) return;
+            string resolvedRoot = srcRoot;
+            _currentVersionRoot = resolvedRoot;
+            _resolvedSnapshotRoot = resolvedRoot;
             if (_versionId <= 0)
             {
-                var ok = Path.Combine(srcRoot, "backup.ok");
+                var ok = Path.Combine(resolvedRoot, "backup.ok");
                 if (!File.Exists(ok)) { EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.restore.incomplete", "Backup in progress or not complete."), "OK"); return; }
             }
             int added = 0;
             void Enumerate(bool relaxed)
             {
-                foreach (var src in Directory.GetFiles(srcRoot, "*", SearchOption.AllDirectories))
+                foreach (var src in Directory.GetFiles(resolvedRoot, "*", SearchOption.AllDirectories))
                 {
-                    string rel = BackupManager.MakeRelTo(src, srcRoot).Replace("\\", "/");
+                    string rel = BackupManager.MakeRelTo(src, resolvedRoot).Replace("\\", "/");
                     if (rel.StartsWith("delta/", StringComparison.OrdinalIgnoreCase)) continue;
                     if (!relaxed && !rel.StartsWith("Assets/", StringComparison.OrdinalIgnoreCase)) continue;
                     if (rel.Equals("manifest.json", StringComparison.OrdinalIgnoreCase) || rel.Equals("backup.ok", StringComparison.OrdinalIgnoreCase) || rel.Equals("version.ok", StringComparison.OrdinalIgnoreCase)) continue;
@@ -916,7 +924,7 @@ namespace AvatarSmartBackup
 
         void DoRestore(bool restoreAsCopy = false)
         {
-            string srcRoot;
+            string? srcRoot;
             if (_versionId > 0)
             {
                 try
@@ -925,6 +933,12 @@ namespace AvatarSmartBackup
                     if (string.IsNullOrEmpty(srcRoot) || !Directory.Exists(srcRoot))
                     {
                         srcRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: false);
+                        if (string.IsNullOrEmpty(srcRoot))
+                        {
+                            var message = string.Format(L.T("rp.restore.prepare.fail", "Failed to prepare snapshot for version {0}:\n{1}"), _versionId, L.T("rp.restore.snapshot.missing", "Snapshot path unavailable."));
+                            EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), message, "OK");
+                            return;
+                        }
                     }
                     var prep = VersionRestoreService.LastResult;
                     _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
@@ -961,11 +975,18 @@ namespace AvatarSmartBackup
                 _snapshotWarning = null;
             }
 
+            if (string.IsNullOrEmpty(srcRoot))
+            {
+                EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.version.notfound", "Version files not found."), "OK");
+                return;
+            }
             if (!Directory.Exists(srcRoot))
             {
                 EditorUtility.DisplayDialog(L.T("rp.restore.title", "Restore"), L.T("rp.version.notfound", "Version files not found."), "OK");
                 return;
             }
+
+            string activeSrcRoot = srcRoot;
 
             string targetRoot;
             if (restoreAsCopy)
@@ -979,7 +1000,7 @@ namespace AvatarSmartBackup
                 targetRoot = FileUtilEx.ProjectRoot;
             }
 
-            _currentVersionRoot = srcRoot;
+            _currentVersionRoot = activeSrcRoot;
 
             if (!restoreAsCopy && _backupBefore)
             {
@@ -1009,7 +1030,7 @@ namespace AvatarSmartBackup
             {
                 if (!_selected[i]) continue;
                 string rel = _files[i].Replace("/", Path.DirectorySeparatorChar.ToString());
-                string src = Path.Combine(srcRoot, rel);
+                string src = Path.Combine(activeSrcRoot, rel);
                 string dst = Path.Combine(targetRoot, rel);
                 try
                 {
@@ -1166,7 +1187,13 @@ Destination: {1}"), restored, targetRoot), "OK");
             {
                 try
                 {
-                    _resolvedSnapshotRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: true);
+                    var snapshotRoot = VersionRestoreService.PrepareSnapshot(_versionId, forceRebuild: true);
+                    if (string.IsNullOrEmpty(snapshotRoot))
+                    {
+                        Log.Warn("Restore rescan failed: snapshot path unavailable.");
+                        return;
+                    }
+                    _resolvedSnapshotRoot = snapshotRoot;
                     var prep = VersionRestoreService.LastResult;
                     _resolvedVersionId = prep?.ResolvedVersionId ?? _versionId;
                     _snapshotWarning = prep?.Message ?? VersionRestoreService.LastWarning;

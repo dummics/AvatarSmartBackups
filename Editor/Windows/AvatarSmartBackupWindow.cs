@@ -822,7 +822,13 @@ namespace AvatarSmartBackup
             if (info == null) return;
             try
             {
-                string path = VersionRestoreService.PrepareSnapshot(info.id, forceRebuild: true);
+                var path = VersionRestoreService.PrepareSnapshot(info.id, forceRebuild: true);
+                if (string.IsNullOrEmpty(path))
+                {
+                    Log.Warn($"Snapshot rebuild returned no path for version #{info.id}.");
+                    EditorUtility.DisplayDialog("Rebuild snapshot", "Unable to rebuild version: snapshot path unavailable.", "OK");
+                    return;
+                }
                 Log.Info($"Snapshot rebuilt for version #{info.id}: {path}");
                 EditorUtility.RevealInFinder(path);
             }

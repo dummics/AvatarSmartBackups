@@ -127,7 +127,8 @@ namespace AvatarSmartBackup
             {
                 var settings = LoadSettings();
                 var normalized = SelectionFilter.NormalizeForStorage(entries);
-                if (normalized.Any(p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+                var normalizedList = normalized ?? new List<string>();
+                if (normalizedList.Any(p => p.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
                 {
                     error = "Script files (.cs) are excluded from backups.";
                     return false;
@@ -138,7 +139,7 @@ namespace AvatarSmartBackup
                 if (frozen)
                 {
                     var existing = new HashSet<string>(settings.trackedRoots ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
-                    foreach (var candidate in normalized)
+                    foreach (var candidate in normalizedList)
                     {
                         if (!existing.Contains(candidate))
                         {
@@ -148,7 +149,7 @@ namespace AvatarSmartBackup
                     }
                 }
 
-                settings.trackedRoots = normalized;
+                settings.trackedRoots = normalizedList;
                 if (lockSelection || hasVersions)
                     settings.selectionLocked = true;
 
@@ -184,7 +185,7 @@ namespace AvatarSmartBackup
             }
         }
 
-        static BackupManifest LoadManifest()
+        static BackupManifest? LoadManifest()
         {
             try
             {
