@@ -5,6 +5,9 @@ using System.IO;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
+using AvatarSmartBackup.Config;
+using AvatarSmartBackup.Easy;
+using AvatarSmartBackup.Shared;
 
 namespace AvatarSmartBackup.Backup
 {
@@ -12,10 +15,33 @@ namespace AvatarSmartBackup.Backup
     {
         const int ManualCheckpointMax = 12;
         readonly BackupWindowContext _context;
+        readonly StatusBanner _statusBanner;
+        readonly SchedulerSection _schedulerSection;
+        readonly VersionsCard _versionsCard;
+        readonly EasyDashboardView _easyDashboard;
 
         public BackupSharedView(BackupWindowContext context)
         {
             _context = context;
+            _statusBanner = new StatusBanner(context.InfoBanner);
+            _schedulerSection = new SchedulerSection(context, _statusBanner);
+            _versionsCard = new VersionsCard(context);
+            _easyDashboard = new EasyDashboardView(context, _statusBanner);
+        }
+
+        public void DrawHeader()
+        {
+            _context.RecordLayoutMarker("Header");
+            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("window.main.header", "Avatar Smart Backup"), EditorStyles.boldLabel);
+        }
+
+        public void DrawAutomaticBackupInfo(BackupLayoutSchema.LayoutMode mode)
+        {
+            _context.RecordLayoutMarker("AutomaticInfo");
+            string infoText = mode == BackupLayoutSchema.LayoutMode.Advanced
+                ? AvatarSmartBackup.Localization.L.T("window.main.autobackup.help.advanced", "Automatic backups run silently. Use manual backups when you need an immediate checkpoint.")
+                : AvatarSmartBackup.Localization.L.T("window.main.autobackup.help.easy", "Backups run in the background. The quick actions below let you react instantly.");
+            EditorGUILayout.LabelField(infoText, EditorStyles.wordWrappedMiniLabel);
         }
 
         public void DrawModeSelector()
@@ -34,139 +60,20 @@ namespace AvatarSmartBackup.Backup
             }
         }
 
-        public void DrawSchedulerSection()
+        public void SyncModeFlags(BackupLayoutSchema.LayoutMode mode)
         {
-            _context.RecordLayoutMarker("SchedulerSection");
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.autobackups.title", "Automatic Backups"), EditorStyles.boldLabel);
-            GUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            bool running = Session.IsRunning;
-            Color prev = GUI.backgroundColor;
-            GUI.backgroundColor = running ? new Color(0.25f, 0.55f, 0.25f, 1f) : new Color(0.45f, 0.2f, 0.2f, 1f);
-            if (GUILayout.Button(new GUIContent(running ? AvatarSmartBackup.Localization.L.T("ui.autobackups.on", "Automatic Backups: ON") : AvatarSmartBackup.Localization.L.T("ui.autobackups.off", "Automatic Backups: OFF"), AvatarSmartBackup.Localization.L.T("ui.autobackups.toggle.tt", "Toggle background backup scheduler")), GUILayout.Width(220), GUILayout.Height(30)))
-            {
-                _context.ToggleScheduler();
-            }
-            GUI.backgroundColor = prev;
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-            EditorGUILayout.Space(2);
-            {
-                var nextLabel = AvatarSmartBackup.Localization.L.T("ui.autobackups.next", "Next");
-                var lastLabel = AvatarSmartBackup.Localization.L.T("ui.autobackups.last", "Last");
-                var never = AvatarSmartBackup.Localization.L.T("ui.never", "never");
-                var nextStr = Session.NextRunUtc?.ToLocalTime().ToString("HH:mm:ss") ?? "--";
-                var lastStr = Session.LastBackupUtc?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? never;
-                EditorGUILayout.LabelField($"{nextLabel}: {nextStr}    {lastLabel}: {lastStr}");
-            }
-            DrawDiskStatusRow();
-            if (_context.Settings.filtersDirty && _context.Settings.easyMode)
-            {
-                using (_context.Info(MessageType.Info, AvatarSmartBackup.Localization.L.T("ui.filters.pending", "Filter changes pending. The next backup will create a full checkpoint to apply the new scope.")))
-                {
-                    GUILayout.Space(2);
-                }
-            }
-            if (_context.Settings.AdvancedMode)
-            {
-                EditorGUILayout.Space(4);
-                DrawIntervalControls();
-                int effCopy = BackupManager.EffectiveCopyMBps(_context.Settings);
-                if (_context.Settings.lastBackupBytes > 0 && effCopy > 0)
-                {
-                    double secNeeded = _context.Settings.lastBackupBytes / (effCopy * 1024.0 * 1024.0);
-                    double intervalSeconds = _context.Settings.intervalInSeconds ? _context.Settings.intervalMinutes : _context.Settings.intervalMinutes * 60.0;
-                    if (secNeeded > intervalSeconds)
-                    {
-                        double minutesNeeded = secNeeded / 60.0;
-                        double mb = _context.Settings.lastBackupBytes / (1024.0 * 1024.0);
-                        using (_context.Info(MessageType.Warning, AvatarSmartBackup.Localization.L.T("warn.backup.speed", "At {0} MB/s, backing up {1:0.0} MB takes ~{2:0.0} min, exceeding the interval.", effCopy, mb, minutesNeeded)))
-                        {
-                            GUILayout.Space(2);
-                        }
-                    }
-                }
-            }
-            else
-            {
-                EditorGUILayout.Space(4);
-                DrawIntervalControls();
-            }
-            EditorGUILayout.EndVertical();
+            _context.RecordLayoutMarker("ModeSync");
+            bool isEasy = mode == BackupLayoutSchema.LayoutMode.Easy;
+            _context.Settings.easyMode = isEasy;
+            _context.Settings.AdvancedMode = !isEasy;
         }
 
-        void DrawDiskStatusRow()
+        public void DrawSchedulerSection() => _schedulerSection.Draw();
+
+        public void DrawEasyDashboard()
         {
-            var report = DiskSpaceMonitor.LastReport;
-            if (report.Status == DiskSpaceStatus.Unknown)
-                return;
-
-            var snapshot = report.Snapshot;
-            if (snapshot.totalBytes <= 0)
-                return;
-
-            string summary = $"Disk free: {DiskSpaceMonitor.FormatBytes(snapshot.freeBytes)} / {DiskSpaceMonitor.FormatBytes(snapshot.totalBytes)}";
-            summary += $" • Backups: {DiskSpaceMonitor.FormatBytes(snapshot.backupSizeBytes)}";
-            if (report.RequiredBytes > 0 && report.Stage != DiskSpaceStage.PostBackup)
-            {
-                summary += $" • Next estimate: {DiskSpaceMonitor.FormatBytes(report.RequiredBytes)}";
-            }
-
-            MessageType type = report.Status switch
-            {
-                DiskSpaceStatus.Warning => MessageType.Warning,
-                DiskSpaceStatus.Critical => MessageType.Error,
-                DiskSpaceStatus.Error => MessageType.Warning,
-                _ => MessageType.Info
-            };
-
-            using (_context.Info(type, summary))
-            {
-                GUILayout.Space(2);
-            }
-        }
-
-        public void DrawIntervalControls()
-        {
-            EditorGUILayout.BeginHorizontal();
-            bool changed = false;
-            string[] unitOptions = { AvatarSmartBackup.Localization.L.T("ui.interval.min", "min"), AvatarSmartBackup.Localization.L.T("ui.interval.sec", "sec") };
-            int currentUnitIndex = _context.Settings.intervalInSeconds ? 1 : 0;
-            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.interval.label", "Interval"), GUILayout.Width(60));
-            int maxValue = _context.Settings.intervalInSeconds ? 3600 : 240;
-            int newInterval = Mathf.Clamp(EditorGUILayout.IntField(_context.Settings.intervalMinutes, GUILayout.Width(70)), 1, maxValue);
-            if (newInterval != _context.Settings.intervalMinutes)
-            {
-                _context.Settings.intervalMinutes = newInterval;
-                changed = true;
-            }
-            int newUnitIndex = EditorGUILayout.Popup(currentUnitIndex, unitOptions, GUILayout.Width(50));
-            if (newUnitIndex != currentUnitIndex)
-            {
-                if (newUnitIndex == 1 && !_context.Settings.intervalInSeconds)
-                {
-                    _context.Settings.intervalMinutes = Mathf.Max(1, _context.Settings.intervalMinutes * 60);
-                    changed = true;
-                }
-                else if (newUnitIndex == 0 && _context.Settings.intervalInSeconds)
-                {
-                    _context.Settings.intervalMinutes = Mathf.Max(1, Mathf.RoundToInt(_context.Settings.intervalMinutes / 60f));
-                    changed = true;
-                }
-                _context.Settings.intervalInSeconds = (newUnitIndex == 1);
-                changed = true;
-            }
-            EditorGUILayout.EndHorizontal();
-            if (changed)
-            {
-                TimerService.InvalidateSettingsCache();
-                if (Session.IsRunning)
-                {
-                    TimerService.ScheduleNextRun(_context.Settings);
-                }
-                _context.RequestRepaint();
-            }
+            _context.RecordLayoutMarker("EasyDashboard");
+            _easyDashboard.Draw();
         }
 
         public void DrawPrimaryActions()
@@ -210,49 +117,12 @@ namespace AvatarSmartBackup.Backup
             EditorGUILayout.EndHorizontal();
         }
 
-        public void DrawVersionsOverview()
-        {
-            _context.RecordLayoutMarker("VersionsOverview");
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.latest.title", "Latest Version"), EditorStyles.boldLabel);
-            _context.EnsureVersionsCache();
-            var latest = _context.GetLatestVersionCached();
-            if (latest != null)
-            {
-                EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.latest.label", "Latest Version:"), EditorStyles.miniBoldLabel);
-                string desc = _context.SanitizeInlineLabel(latest.description, AvatarSmartBackup.Localization.L.T("ui.overview.noDescription", "(no description)"));
-                EditorGUILayout.LabelField($"# {latest.id}  {desc}", EditorStyles.miniLabel);
-                var created = _context.ParseCreatedUtc(latest);
-                if (created != DateTime.MinValue)
-                    EditorGUILayout.LabelField($"{AvatarSmartBackup.Localization.L.T("ui.overview.created", "Created:")} {created:yyyy-MM-dd HH:mm:ss}", EditorStyles.miniLabel);
-                {
-                    var filesLbl = AvatarSmartBackup.Localization.L.T("ui.overview.filesSize", "Files");
-                    var sizeLbl = AvatarSmartBackup.Localization.L.T("ui.overview.size", "Size");
-                    EditorGUILayout.LabelField($"{filesLbl}: {latest.fileCount}  {sizeLbl}: {_context.FormatSize(latest.totalSizeBytes)}", EditorStyles.miniLabel);
-                }
-                if (GUILayout.Button(new GUIContent(AvatarSmartBackup.Localization.L.T("ui.overview.gotoVersions", "Go to Versions"), AvatarSmartBackup.Localization.L.T("tt.overview.gotoVersions", "Open Versions tab")), GUILayout.Width(140)))
-                {
-                    _context.Settings._activeTab = 1;
-                }
-            }
-            else
-            {
-                EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.overview.none", "No versions available"), EditorStyles.miniLabel);
-            }
-            EditorGUILayout.EndVertical();
-        }
+        public void DrawVersionsOverview() => _versionsCard.Draw();
 
-        public void DrawEasyModeFooter()
+        public void DrawBodySpacing()
         {
-            _context.RecordLayoutMarker("EasyFooter");
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField(AvatarSmartBackup.Localization.L.T("ui.easy.summary", "Easy mode shows the essentials. Switch to Advanced for detailed controls."), EditorStyles.wordWrappedMiniLabel);
-            if (GUILayout.Button(AvatarSmartBackup.Localization.L.T("ui.easy.switch", "Switch to Advanced"), GUILayout.Width(200)))
-            {
-                _context.Settings.easyMode = false;
-                _context.Settings.AdvancedMode = true;
-            }
-            EditorGUILayout.EndVertical();
+            _context.RecordLayoutMarker("BodySpacing");
+            EditorGUILayout.Space();
         }
 
         public void DrawAdvancedOverview()

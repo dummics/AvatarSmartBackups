@@ -347,7 +347,14 @@ namespace AvatarSmartBackup.Backup
 
             try
             {
-                RestorePreviewWindow.Open(info.id);
+                if (Settings.easyMode && !Settings.AdvancedMode)
+                {
+                    AvatarSmartBackup.Restore.Easy.RestoreEasyWizard.Open(info);
+                }
+                else
+                {
+                    RestorePreviewWindow.Open(info.id);
+                }
             }
             catch (Exception ex)
             {

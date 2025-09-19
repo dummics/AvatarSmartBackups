@@ -3,6 +3,7 @@ using System;
 using UnityEditor;
 using UnityEngine;
 using AvatarSmartBackup.Backup;
+using AvatarSmartBackup.Config;
 
 namespace AvatarSmartBackup
 {
@@ -10,8 +11,6 @@ namespace AvatarSmartBackup
     {
         BackupWindowContext? _context;
         BackupSharedView? _sharedView;
-        BackupEasyView? _easyView;
-        BackupAdvancedView? _advancedView;
         BackupVersionsView? _versionsView;
 
         static bool _forceBackupTabOnOpen;
@@ -66,8 +65,6 @@ namespace AvatarSmartBackup
             _context?.Dispose();
             _context = null;
             _sharedView = null;
-            _easyView = null;
-            _advancedView = null;
             _versionsView = null;
         }
 
@@ -87,9 +84,57 @@ namespace AvatarSmartBackup
         {
             var context = Context;
             _sharedView ??= new BackupSharedView(context);
-            _easyView ??= new BackupEasyView(context, _sharedView);
-            _advancedView ??= new BackupAdvancedView(context, _sharedView);
             _versionsView ??= new BackupVersionsView(context);
+        }
+
+        void DrawBackupTab()
+        {
+            if (_sharedView == null)
+                return;
+
+            var currentMode = Context.Settings.easyMode ? BackupLayoutSchema.LayoutMode.Easy : BackupLayoutSchema.LayoutMode.Advanced;
+            foreach (var block in BackupLayoutSchema.MainWindowBlocks)
+            {
+                if (!block.Supports(currentMode))
+                    continue;
+
+                switch (block.Id)
+                {
+                    case BackupLayoutSchema.MainWindowBlock.Header:
+                        _sharedView.DrawHeader();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.AutomaticInfo:
+                        _sharedView.DrawAutomaticBackupInfo(currentMode);
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.ModeSelector:
+                        _sharedView.DrawModeSelector();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.ModeSync:
+                        _sharedView.SyncModeFlags(currentMode);
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.EasyDashboard:
+                        _sharedView.DrawEasyDashboard();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.Scheduler:
+                        _sharedView.DrawSchedulerSection();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.PrimaryActions:
+                        _sharedView.DrawPrimaryActions();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.VersionsOverview:
+                        _sharedView.DrawVersionsOverview();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.BodySpacing:
+                        _sharedView.DrawBodySpacing();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.AdvancedOverview:
+                        _sharedView.DrawAdvancedOverview();
+                        break;
+                    case BackupLayoutSchema.MainWindowBlock.AdvancedSettings:
+                        _sharedView.DrawAdvancedSettings();
+                        break;
+                }
+            }
         }
 
         void OnGUI()
@@ -112,10 +157,7 @@ namespace AvatarSmartBackup
                 context.Scroll = EditorGUILayout.BeginScrollView(context.Scroll);
                 if (context.Settings._activeTab == 0)
                 {
-                    if (context.Settings.easyMode)
-                        _easyView!.Draw();
-                    else
-                        _advancedView!.Draw();
+                    DrawBackupTab();
                 }
                 else
                 {
