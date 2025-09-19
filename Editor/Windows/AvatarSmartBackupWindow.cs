@@ -77,11 +77,12 @@ namespace AvatarSmartBackup
         [MenuItem("Avatar Smart Backup/About", false, 100)]
         public static void ShowAbout()
         {
-            var packageName = Utils.PackageInfo.GetDisplayName();
-            var version = Utils.PackageInfo.GetVersion();
-            var description = Utils.PackageInfo.GetDescription();
-            var author = Utils.PackageInfo.GetAuthor();
-            var packageId = Utils.PackageInfo.GetPackageName();
+            // Per ora usamo valori statici - TODO: integrare PackageInfo quando risolviamo i namespace
+            var packageName = "Avatar Smart Backup";
+            var version = "0.2.0";
+            var description = "Incremental backup for VRChat projects.";
+            var author = "Dummics";
+            var packageId = "dum.incb.system";
 
             var message = $"{packageName}\n\n" +
                          $"Version: {version}\n" +
