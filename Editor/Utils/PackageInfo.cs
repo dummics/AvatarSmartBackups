@@ -12,11 +12,11 @@ namespace AvatarSmartBackup.Editor.Utils
         [Serializable]
         private class PackageData
         {
-            public string? name;
-            public string? displayName;
-            public string? version;
-            public string? description;
-            public string? author;
+            public string name = string.Empty;
+            public string displayName = string.Empty;
+            public string version = string.Empty;
+            public string description = string.Empty;
+            public string author = string.Empty;
         }
         
         private static PackageData? _cachedData;
