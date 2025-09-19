@@ -916,21 +916,21 @@ namespace AvatarSmartBackup
     public class VersionInfo
     {
         public int id;
-        public string description;
+        public string description = "";
         public DateTime timestamp;
-        public string backupPath;
-        public string guid;
-        public string createdUtc;
+        public string backupPath = "";
+        public string guid = "";
+        public string createdUtc = "";
         public long totalSizeBytes;
         public int fileCount;
         public bool pinned;
-        public string manifestFile;
+        public string manifestFile = "";
         public bool incomplete;
         public int toolVersion;
         public bool corrupt;
         public bool corrupted;
-        public string corruptionReason;
-        public string lastCorruptionUtc;
+        public string corruptionReason = "";
+        public string lastCorruptionUtc = "";
         public bool isCheckpoint;
         public int parentId;
         public int checkpointId;
@@ -939,7 +939,7 @@ namespace AvatarSmartBackup
         public int removedFileCount;
         public long changedBytes;
         public long removedBytes;
-        public string deltaFile;
+        public string deltaFile = "";
         public bool hasAdvancedMetadata;
         public List<VersionCategoryStat> categoryStats = new List<VersionCategoryStat>();
     }
@@ -949,7 +949,7 @@ namespace AvatarSmartBackup
     {
         public static int CurrentSchemaVersion = 5;
         public int schemaVersion;
-        public List<VersionInfo> versions;
+        public List<VersionInfo> versions = new List<VersionInfo>();
     }
 }
 #endif

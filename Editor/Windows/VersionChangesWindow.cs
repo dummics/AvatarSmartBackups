@@ -27,8 +27,8 @@ namespace AvatarSmartBackup
         static readonly Color ColorModified = new Color(0.77f, 0.55f, 0.16f, 0.22f);
         static readonly Color ColorRemoved = new Color(0.75f, 0.25f, 0.25f, 0.22f);
 
-        VersionInfo _version;
-        VersionDeltaMetadata _metadata;
+        VersionInfo _version = null!;
+        VersionDeltaMetadata _metadata = null!;
         Vector2 _scroll;
         string _search = string.Empty;
         bool _showAdded = true;
@@ -354,14 +354,14 @@ namespace AvatarSmartBackup
 
         static class Styles
         {
-            static GUIStyle _summaryLabel;
-            static GUIStyle _badgeLabel;
-            static GUIStyle _toggleLabel;
-            static GUIStyle _kindLabel;
-            static GUIStyle _pathLabel;
-            static GUIStyle _highlightPathLabel;
-            static GUIStyle _categoryLabel;
-            static GUIStyle _sizeLabel;
+            static GUIStyle _summaryLabel = null!;
+            static GUIStyle _badgeLabel = null!;
+            static GUIStyle _toggleLabel = null!;
+            static GUIStyle _kindLabel = null!;
+            static GUIStyle _pathLabel = null!;
+            static GUIStyle _highlightPathLabel = null!;
+            static GUIStyle _categoryLabel = null!;
+            static GUIStyle _sizeLabel = null!;
 
             public static GUIStyle SummaryLabel => _summaryLabel ??= new GUIStyle(EditorStyles.label)
             {

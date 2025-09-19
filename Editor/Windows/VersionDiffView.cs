@@ -280,14 +280,14 @@ namespace AvatarSmartBackup
             public const float MiniBadgeWidth = 120f;
             public const float FilterBadgeWidth = 110f;
 
-            static GUIStyle _summaryLabel;
-            static GUIStyle _badgeLabel;
-            static GUIStyle _toggleLabel;
-            static GUIStyle _kindLabel;
-            static GUIStyle _pathLabel;
-            static GUIStyle _highlightPathLabel;
-            static GUIStyle _categoryLabel;
-            static GUIStyle _sizeLabel;
+            static GUIStyle _summaryLabel = null!;
+            static GUIStyle _badgeLabel = null!;
+            static GUIStyle _toggleLabel = null!;
+            static GUIStyle _kindLabel = null!;
+            static GUIStyle _pathLabel = null!;
+            static GUIStyle _highlightPathLabel = null!;
+            static GUIStyle _categoryLabel = null!;
+            static GUIStyle _sizeLabel = null!;
 
             public static Color ColorCheckpoint { get; } = new Color(0.23f, 0.46f, 0.80f, 0.18f);
             public static Color ColorIncremental { get; } = new Color(0.45f, 0.35f, 0.78f, 0.18f);

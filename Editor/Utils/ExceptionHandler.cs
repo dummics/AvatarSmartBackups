@@ -22,7 +22,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage);
+                HandleException(ex, operationName, userFriendlyMessage!);
             }
         }
 
@@ -38,7 +38,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage);
+                HandleException(ex, operationName, userFriendlyMessage!);
                 return defaultValue;
             }
         }
@@ -54,7 +54,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage);
+                HandleException(ex, operationName, userFriendlyMessage!);
             }
         }
 
@@ -70,7 +70,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage);
+                HandleException(ex, operationName, userFriendlyMessage!);
                 return defaultValue;
             }
         }
