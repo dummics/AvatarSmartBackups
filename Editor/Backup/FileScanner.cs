@@ -26,7 +26,7 @@ namespace AvatarSmartBackup
 
     internal interface IFileScanner
     {
-        IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string> dirtyPaths = null);
+        IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string>? dirtyPaths = null);
     }
 
     internal sealed class FileScanner : IFileScanner
@@ -41,7 +41,7 @@ namespace AvatarSmartBackup
             "Expression Parameters.asset"
         };
 
-        public IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string> dirtyPaths = null)
+        public IReadOnlyList<FileScanResult> Scan(BackupSettings settings, IEnumerable<string>? dirtyPaths = null)
         {
             if (settings == null) throw new ArgumentNullException(nameof(settings));
 
@@ -180,7 +180,7 @@ namespace AvatarSmartBackup
             return set;
         }
 
-        static List<string> NormalizeDirtyPaths(IEnumerable<string> dirtyPaths, string assetsRoot)
+        static List<string> NormalizeDirtyPaths(IEnumerable<string>? dirtyPaths, string assetsRoot)
         {
             var result = new List<string>();
             if (dirtyPaths == null) return result;
@@ -199,22 +199,22 @@ namespace AvatarSmartBackup
                 {
                     foreach (var file in EnumerateAssets(abs))
                     {
-                        string normalized = NormalizeCandidate(file);
-                        if (normalized != null && seen.Add(normalized))
+                        var normalized = NormalizeCandidate(file);
+                        if (!string.IsNullOrEmpty(normalized) && seen.Add(normalized))
                             result.Add(normalized);
                     }
                 }
                 else if (File.Exists(abs))
                 {
-                    string normalized = NormalizeCandidate(abs);
-                    if (normalized != null && seen.Add(normalized))
+                    var normalized = NormalizeCandidate(abs);
+                    if (!string.IsNullOrEmpty(normalized) && seen.Add(normalized))
                         result.Add(normalized);
                 }
             }
             return result;
         }
 
-        static string NormalizeCandidate(string absPath)
+        static string? NormalizeCandidate(string? absPath)
         {
             if (string.IsNullOrEmpty(absPath)) return null;
             if (absPath.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))

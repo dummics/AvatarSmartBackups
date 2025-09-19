@@ -24,7 +24,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage!);
+                HandleException(ex, operationName, userFriendlyMessage);
             }
         }
 
@@ -32,7 +32,7 @@ namespace AvatarSmartBackup
         /// Execute a function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static T SafeExecute<T>(Func<T> func, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
+        public static T SafeExecute<T>(Func<T> func, string operationName, string? userFriendlyMessage = null, T defaultValue = default)
         {
             try
             {
@@ -40,8 +40,8 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage!);
-                return defaultValue!;
+                HandleException(ex, operationName, userFriendlyMessage);
+                return defaultValue;
             }
         }
 
@@ -56,7 +56,7 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage!);
+                HandleException(ex, operationName, userFriendlyMessage);
             }
         }
 
@@ -64,7 +64,7 @@ namespace AvatarSmartBackup
         /// Execute an async function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
+        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string? userFriendlyMessage = null, T defaultValue = default)
         {
             try
             {
@@ -72,22 +72,22 @@ namespace AvatarSmartBackup
             }
             catch (Exception ex)
             {
-                HandleException(ex, operationName, userFriendlyMessage!);
-                return defaultValue!;
+                HandleException(ex, operationName, userFriendlyMessage);
+                return defaultValue;
             }
         }
 
         /// <summary>
         /// Central exception handling logic
         /// </summary>
-        private static void HandleException(Exception ex, string operationName, string userFriendlyMessage)
+        private static void HandleException(Exception ex, string operationName, string? userFriendlyMessage)
         {
             // Detailed technical message for log file
             string detailedMessage = $"Operation '{operationName}' failed: {ex.Message}";
-            
+
             // User-friendly message for console (fallback to operation name if not provided)
             string consoleMessage = userFriendlyMessage ?? $"Operation failed: {operationName}";
-            
+
             // Add suggestion to check log file
             if (!string.IsNullOrEmpty(userFriendlyMessage))
                 consoleMessage += " (see log file for details)";
