@@ -32,7 +32,7 @@ namespace AvatarSmartBackup
         /// Execute a function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static T SafeExecute<T>(Func<T> func, string operationName, string? userFriendlyMessage = null, T defaultValue = default)
+        public static T SafeExecute<T>(Func<T> func, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
         {
             try
             {
@@ -64,7 +64,7 @@ namespace AvatarSmartBackup
         /// Execute an async function with automatic exception handling and logging
         /// Returns default(T) if an exception occurs
         /// </summary>
-        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string? userFriendlyMessage = null, T defaultValue = default)
+        public static async Task<T> SafeExecuteAsync<T>(Func<Task<T>> asyncFunc, string operationName, string? userFriendlyMessage = null, T defaultValue = default!)
         {
             try
             {
