@@ -22,11 +22,11 @@ namespace AvatarSmartBackup
             else EditorApplication.delayCall += () => action();
         }
 
-        public static T? InvokeBlocking<T>(Func<T>? func)
+        public static T InvokeBlocking<T>(Func<T> func)
         {
             if (func == null) return default;
             if (Thread.CurrentThread.ManagedThreadId == MainId) return func();
-            T? result = default;
+            T result = default;
             var ev = new ManualResetEventSlim();
             EditorApplication.delayCall += () =>
             {

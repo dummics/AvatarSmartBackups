@@ -64,7 +64,7 @@ namespace AvatarSmartBackup
                     }
                     return id;
                 });
-                return result ?? -1;
+                return result;
             }
             catch { return -1; }
         }
