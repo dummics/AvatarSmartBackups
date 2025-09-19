@@ -29,7 +29,7 @@ jobs:
     needs: prepare
     uses: ./.github/workflows/build.yaml
     with:
-      project: ./YourSolutionOrCsproj.sln   # <— metti qui la tua .sln o .csproj
+      project: ./src/AvatarSmartBackups.Core/AvatarSmartBackups.Core.csproj
       configuration: Release
     secrets: inherit
 
